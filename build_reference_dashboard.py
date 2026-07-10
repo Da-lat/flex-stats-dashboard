@@ -215,8 +215,15 @@ def roster_only_sections() -> tuple[str, str]:
       <div class=\"table-wrap\"><table><thead><tr><th>Player</th><th>Eligible games</th><th>Match IDs</th></tr></thead><tbody>{profile_rows}</tbody></table></div>
     </section>
     """
+    def champion_pairs_html(champions: list[str]) -> str:
+        pairs = []
+        for pair in champions:
+            player, champion = pair.split(": ", 1)
+            pairs.append(f"<strong>{escape(player)}</strong>: {escape(champion)}")
+        return ", ".join(pairs)
+
     log_rows = "".join(
-        f"<tr id=\"match-{row['number']}\" data-match-search=\"match {row['number']} {escape(str(row['id']))} {escape(' '.join(row['players']))} {escape(' '.join(row['champions']))}\"><td>Match {row['number']}</td><td class=\"match-id\"><a href=\"https://www.leagueofgraphs.com/match/euw/{escape(str(row['id']).removeprefix('EUW1_'))}\" target=\"_blank\" rel=\"noopener noreferrer\">{escape(str(row['id']))}</a></td><td>{escape(str(row['played']))}</td><td class=\"{'result-win' if row['result'] == 'Win' else 'result-loss'}\">{escape(str(row['result']))}</td><td>{escape(', '.join(row['players']))}</td><td>{escape(', '.join(row['champions']))}</td><td>{row['minutes']}</td></tr>"
+        f"<tr id=\"match-{row['number']}\" data-match-search=\"match {row['number']} {escape(str(row['id']))} {escape(' '.join(row['players']))} {escape(' '.join(row['champions']))}\"><td>Match {row['number']}</td><td class=\"match-id\"><a href=\"https://www.leagueofgraphs.com/match/euw/{escape(str(row['id']).removeprefix('EUW1_'))}\" target=\"_blank\" rel=\"noopener noreferrer\">{escape(str(row['id']))}</a></td><td>{escape(str(row['played']))}</td><td class=\"{'result-win' if row['result'] == 'Win' else 'result-loss'}\">{escape(str(row['result']))}</td><td>{escape(', '.join(row['players']))}</td><td>{champion_pairs_html(row['champions'])}</td><td>{row['minutes']}</td></tr>"
         for row in rows
     )
     matches = f"""
