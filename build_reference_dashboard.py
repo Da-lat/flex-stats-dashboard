@@ -22,7 +22,6 @@ REFERENCE_GENERATOR = Path(r"C:\Users\brand\Documents\Coding\Python\Custom_match
 ROLE_MAP = {"MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUPP"}
 VALID_ROLES = {"TOP", "JUNGLE", "MID", "BOT", "SUPP"}
 MINIMUM_GAME_SECONDS = 10 * 60
-CHAMPION_POOL_DISPLAY_LIMIT = 15
 UK_TIMEZONE = ZoneInfo("Europe/London")
 SHARED_NAV_HTML = """<nav class="shared-dashboard-nav">
     <a href="index.html#overview">Dashboard</a>
@@ -384,14 +383,23 @@ def render_with_qualification_thresholds() -> None:
     )
     renderer.heat_color = winrate_color
     renderer.heat_text_color = winrate_text_color
-    original_horizontal_pool = renderer.champion_pool_horizontal_svg
-    original_vertical_pool = renderer.champion_pool_vertical_svg
-    renderer.champion_pool_horizontal_svg = lambda player, rows: original_horizontal_pool(
-        player, rows[:CHAMPION_POOL_DISPLAY_LIMIT]
-    )
-    renderer.champion_pool_vertical_svg = lambda player, rows: original_vertical_pool(
-        player, rows[:CHAMPION_POOL_DISPLAY_LIMIT]
-    )
+    def compact_champion_pool(_player, rows):
+        items = []
+        for row in rows:
+            champion = str(row["champion"])
+            games = int(row["games"])
+            winrate = float(row["winrate"])
+            games_label = "game" if games == 1 else "games"
+            items.append(
+                f'<div class="compact-champion-item" style="--wr-color:{winrate_color(winrate)}" title="{escape(champion)}: {games} {games_label}, {winrate * 100:.1f}% win rate">'
+                f'<img src="{escape(renderer.champion_icon_url(champion))}" alt="{escape(champion)}">'
+                f'<span class="compact-champion-name">{escape(champion)}</span>'
+                f'<b>{games}g</b><strong>{winrate * 100:.1f}%</strong></div>'
+            )
+        return f'<div class="compact-champion-grid">{"".join(items)}</div>'
+
+    renderer.champion_pool_horizontal_svg = compact_champion_pool
+    renderer.champion_pool_vertical_svg = lambda _player, _rows: ""
     renderer.build_dashboard(EXPORTED_HISTORY, OUTPUT_DIRECTORY / "index.html")
 
 
@@ -410,7 +418,12 @@ def main() -> None:
     rendered = rendered.replace("LoL Customs Dashboard", "League Flex Dashboard")
     rendered = rendered.replace(
         "Browse one player at a time. Unique-pick rate is unique champions divided by games, so champion pool depth is not just raw volume.",
-        f"Browse one player at a time. Charts show each player's {CHAMPION_POOL_DISPLAY_LIMIT} most-played champions; the summary still counts their full pool.",
+        "Browse one player at a time. Every champion is shown in a compact grid, ordered by games played.",
+    )
+    rendered = re.sub(
+        r'<button type="button" class="orientation-button[^>]*>.*?</button>',
+        "",
+        rendered,
     )
     rendered = re.sub(r'\s*<div class="header-actions"[^>]*>.*?</div>', "", rendered, count=1, flags=re.DOTALL)
     rendered = re.sub(r'\s*<a href="#match-history">Matches</a>', "", rendered, count=1)
@@ -482,7 +495,7 @@ def main() -> None:
     rendered = rendered.replace("</main>", tracked_combos + champion_history + matches + "</main>", 1)
     rendered = rendered.replace(
         "</head>",
-        "<style>.roster-match-ids{margin:20px 0}.match-id-list{max-width:800px;padding:10px 0;color:#9fb9d1;line-height:1.7;word-break:break-all}.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}.champion-match-links{max-width:620px;padding:8px 0;line-height:1.8}.champion-match-links a{white-space:nowrap}</style></head>",
+        "<style>.roster-match-ids{margin:20px 0}.match-id-list{max-width:800px;padding:10px 0;color:#9fb9d1;line-height:1.7;word-break:break-all}.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}.champion-match-links{max-width:620px;padding:8px 0;line-height:1.8}.champion-match-links a{white-space:nowrap}.compact-champion-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:6px;padding:2px}.compact-champion-item{display:grid;grid-template-columns:30px minmax(0,1fr) auto auto;align-items:center;gap:7px;min-height:38px;padding:4px 8px 4px 5px;background:#172231;border:1px solid #2a394b;border-left:3px solid var(--wr-color);border-radius:7px}.compact-champion-item img{width:28px;height:28px;object-fit:cover;border-radius:5px}.compact-champion-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.compact-champion-item b{color:#a9bed2;font-size:.78rem}.compact-champion-item strong{color:var(--wr-color);font-size:.82rem;font-variant-numeric:tabular-nums}@media(max-width:700px){.compact-champion-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}.compact-champion-item{grid-template-columns:26px minmax(0,1fr) auto}.compact-champion-item img{width:24px;height:24px}.compact-champion-item b{display:none}}</style></head>",
         1,
     )
     index_path.write_text(rendered, encoding="utf-8")
