@@ -1,0 +1,4 @@
+.streamlit/secrets.toml
+data/*.sqlite3
+data/reference_match_history.json
+__pycache__/

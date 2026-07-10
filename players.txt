@@ -1,0 +1,22 @@
+# Fixed roster. Separate alternate accounts with commas; all accounts on a line
+# are treated as the same person in the dashboard.
+Wyn#EUW | Wyn
+Welshy#Cymru, Petez#Wales | Pete
+Brands#dave, Bún Chả#Boys | Brands
+01554#SA14, Anticide#duck, Minz#666 | Minz
+Sam#flip | Sam
+Goldylookinchain#gewld | Rich
+Birbo#brbo | Laurel
+GothFemBoy1#CUKC | Jay
+Leigh#EUW | Leigh
+wind boy#Bonni | James
+Maballs#EUW | Felix
+GothFemBoy2#CUKC | Iestyn
+Chameleon#6269 | Dylan
+Grantyboi#EUW | Grant
+Farmer#EUWUK | Farmer
+Peezy#JNS | Sean
+Cass#LRLR | Cass
+jakegt1#EUW | Jake
+TheTopStomper#RKJ | Jordan
+Jays Nemesis#plat, wincon#dotgg | Andreas
