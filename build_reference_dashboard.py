@@ -264,7 +264,11 @@ def main() -> None:
     for page_path in OUTPUT_DIRECTORY.glob("*.html"):
         page = page_path.read_text(encoding="utf-8")
         page = re.sub(r'\s*<div class="header-actions"[^>]*>.*?</div>', "", page, count=1, flags=re.DOTALL)
+        page = re.sub(r'\s*<a href="(?:index_draft_coach\.html#draft-coach|#draft-coach)">Draft Coach</a>', "", page)
+        page = re.sub(r'\s*<a href="(?:index_random_pool\.html#random-champion-pool|#random-champion-pool)">Random Pool</a>', "", page)
         page_path.write_text(page, encoding="utf-8")
+    for removed_page in ("index_draft_coach.html", "index_random_pool.html"):
+        (OUTPUT_DIRECTORY / removed_page).unlink(missing_ok=True)
     print(f"Rendered {count} eligible flex games in reference dashboard style.")
 
 
