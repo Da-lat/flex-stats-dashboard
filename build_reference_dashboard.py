@@ -19,6 +19,17 @@ REFERENCE_GENERATOR = Path(r"C:\Users\brand\Documents\Coding\Python\Custom_match
 ROLE_MAP = {"MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUPP"}
 VALID_ROLES = {"TOP", "JUNGLE", "MID", "BOT", "SUPP"}
 MINIMUM_GAME_SECONDS = 10 * 60
+SHARED_NAV_HTML = """<nav>
+    <a href="index.html#overview">Dashboard</a>
+    <a href="index.html#players">Players</a>
+    <a href="index.html#champions">Champions</a>
+    <a href="index.html#combos">Combos</a>
+    <a href="index.html#matches">Matches</a>
+    <a href="index_teams.html#teams">Teams</a>
+    <a href="index_showcases.html">Showcases</a>
+    <a href="index_head_to_head.html#head-to-head">Head to Head</a>
+    <a href="index_experimental.html#custom-meta">Experimental</a>
+  </nav>"""
 
 
 def display_role(participant: dict) -> str:
@@ -339,6 +350,7 @@ def main() -> None:
         page = re.sub(r'\s*<div class="header-actions"[^>]*>.*?</div>', "", page, count=1, flags=re.DOTALL)
         page = re.sub(r'\s*<a href="(?:index_draft_coach\.html#draft-coach|#draft-coach)">Draft Coach</a>', "", page)
         page = re.sub(r'\s*<a href="(?:index_random_pool\.html#random-champion-pool|#random-champion-pool)">Random Pool</a>', "", page)
+        page = re.sub(r'<nav>.*?</nav>', SHARED_NAV_HTML, page, count=1, flags=re.DOTALL)
         page_path.write_text(page, encoding="utf-8")
     for removed_page in ("index_draft_coach.html", "index_random_pool.html"):
         (OUTPUT_DIRECTORY / removed_page).unlink(missing_ok=True)
