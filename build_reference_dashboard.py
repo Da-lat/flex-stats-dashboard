@@ -109,7 +109,14 @@ def tracked_match_log() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
         roster_team = next((team for team in teams.values() if sum(p.get("puuid") in tracked for p in team) >= 2), None)
         if not roster_team:
             continue
-        names = sorted({tracked[p["puuid"]] for p in roster_team if p.get("puuid") in tracked})
+        tracked_picks = sorted(
+            {
+                (tracked[p["puuid"]], str(p.get("championName", "Unknown")))
+                for p in roster_team
+                if p.get("puuid") in tracked
+            }
+        )
+        names = sorted({name for name, _champion in tracked_picks})
         match_id = str(payload.get("metadata", {}).get("matchId", ""))
         timestamp = info.get("gameEndTimestamp") or info.get("gameCreation")
         rows.append({
@@ -118,6 +125,7 @@ def tracked_match_log() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
             "played": datetime.fromtimestamp(timestamp / 1000, timezone.utc).strftime("%d %b %Y, %H:%M UTC") if timestamp else "-",
             "sort": timestamp or 0,
             "players": names,
+            "champions": [f"{name} — {champion}" for name, champion in tracked_picks],
             "result": "Win" if roster_team[0].get("win") else "Loss",
             "minutes": round(info.get("gameDuration", 0) / 60, 1),
         })
@@ -142,13 +150,13 @@ def roster_only_sections() -> tuple[str, str]:
     </section>
     """
     log_rows = "".join(
-        f"<tr id=\"match-{row['number']}\" data-match-search=\"match {row['number']} {escape(str(row['id']))} {escape(' '.join(row['players']))}\"><td>Match {row['number']}</td><td class=\"match-id\"><a href=\"https://www.leagueofgraphs.com/match/euw/{escape(str(row['id']).removeprefix('EUW1_'))}\" target=\"_blank\" rel=\"noopener noreferrer\">{escape(str(row['id']))}</a></td><td>{escape(str(row['played']))}</td><td class=\"{'result-win' if row['result'] == 'Win' else 'result-loss'}\">{escape(str(row['result']))}</td><td>{escape(', '.join(row['players']))}</td><td>{row['minutes']}</td></tr>"
+        f"<tr id=\"match-{row['number']}\" data-match-search=\"match {row['number']} {escape(str(row['id']))} {escape(' '.join(row['players']))} {escape(' '.join(row['champions']))}\"><td>Match {row['number']}</td><td class=\"match-id\"><a href=\"https://www.leagueofgraphs.com/match/euw/{escape(str(row['id']).removeprefix('EUW1_'))}\" target=\"_blank\" rel=\"noopener noreferrer\">{escape(str(row['id']))}</a></td><td>{escape(str(row['played']))}</td><td class=\"{'result-win' if row['result'] == 'Win' else 'result-loss'}\">{escape(str(row['result']))}</td><td>{escape(', '.join(row['players']))}</td><td>{escape(', '.join(row['champions']))}</td><td>{row['minutes']}</td></tr>"
         for row in rows
     )
     matches = f"""
     <section id=\"matches\" class=\"section\">
       <div class=\"section-title\"><div><h2>Matches</h2><p class=\"note\">Roster-only log. Each row includes the tracked players who shared a Ranked Flex team.</p></div></div>
-      <section class=\"table-panel\"><div class=\"section-heading\"><h3>Match database</h3><input id=\"match-db-search\" class=\"table-search\" type=\"search\" placeholder=\"Search match number, Riot ID, or player\"></div><div class=\"table-wrap\"><table class=\"sortable-table\"><thead><tr><th>Match #</th><th>Riot Match ID</th><th>Played</th><th>Result</th><th>Tracked players</th><th>Minutes</th></tr></thead><tbody>{log_rows}</tbody></table></div></section>
+      <section class=\"table-panel\"><div class=\"section-heading\"><h3>Match database</h3><input id=\"match-db-search\" class=\"table-search\" type=\"search\" placeholder=\"Search match, player, or champion\"></div><div class=\"table-wrap\"><table class=\"sortable-table\"><thead><tr><th>Match #</th><th>Riot Match ID</th><th>Played</th><th>Result</th><th>Tracked players</th><th>Tracked champions</th><th>Minutes</th></tr></thead><tbody>{log_rows}</tbody></table></div></section>
     </section>
     <script>document.getElementById('match-db-search')?.addEventListener('input', event => {{ const query = event.target.value.toLowerCase(); document.querySelectorAll('#matches tbody tr').forEach(row => row.hidden = !row.dataset.matchSearch.toLowerCase().includes(query)); }});</script>
     """
