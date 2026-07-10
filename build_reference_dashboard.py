@@ -384,6 +384,11 @@ def main() -> None:
         experimental,
         flags=re.DOTALL,
     )
+    upset_start = experimental.find('<section id="upset-detector"')
+    if upset_start >= 0:
+        upset_end = experimental.find("</section>", upset_start)
+        if upset_end >= 0:
+            experimental = experimental[:upset_start] + experimental[upset_end + len("</section>"):]
     experimental_path.write_text(experimental, encoding="utf-8")
     for page_path in OUTPUT_DIRECTORY.glob("*.html"):
         page = page_path.read_text(encoding="utf-8")
