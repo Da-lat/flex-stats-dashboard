@@ -188,7 +188,7 @@ def tracked_match_log() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
             "played": datetime.fromtimestamp(timestamp / 1000, timezone.utc).strftime("%d %b %Y, %H:%M UTC") if timestamp else "-",
             "sort": timestamp or 0,
             "players": names,
-            "champions": [f"{name} — {champion}" for name, champion in tracked_picks],
+            "champions": [f"{name}: {champion}" for name, champion in tracked_picks],
             "result": "Win" if roster_team[0].get("win") else "Loss",
             "minutes": round(info.get("gameDuration", 0) / 60, 1),
         })
