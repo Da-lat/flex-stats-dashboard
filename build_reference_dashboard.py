@@ -253,6 +253,10 @@ def main() -> None:
         flags=re.DOTALL,
     )
     experimental_path.write_text(experimental, encoding="utf-8")
+    for page_path in OUTPUT_DIRECTORY.glob("*.html"):
+        page = page_path.read_text(encoding="utf-8")
+        page = re.sub(r'\s*<div class="header-actions"[^>]*>.*?</div>', "", page, count=1, flags=re.DOTALL)
+        page_path.write_text(page, encoding="utf-8")
     print(f"Rendered {count} eligible flex games in reference dashboard style.")
 
 
