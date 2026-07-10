@@ -44,6 +44,32 @@ SHARED_NAV_CSS = """<style id="shared-dashboard-nav-style">
 </style>"""
 
 
+def winrate_color(winrate: float) -> str:
+    """Return a performance colour calibrated around a 50% baseline."""
+    stops = (
+        (0.00, (155, 43, 61)),
+        (0.40, (207, 71, 86)),
+        (0.47, (222, 143, 65)),
+        (0.50, (205, 174, 84)),
+        (0.53, (132, 184, 89)),
+        (0.56, (67, 190, 112)),
+        (0.60, (27, 170, 98)),
+        (0.70, (10, 126, 72)),
+        (1.00, (6, 91, 52)),
+    )
+    value = max(0.0, min(1.0, float(winrate)))
+    for (lower, start), (upper, end) in zip(stops, stops[1:]):
+        if value <= upper:
+            amount = (value - lower) / (upper - lower)
+            channels = tuple(round(a + ((b - a) * amount)) for a, b in zip(start, end))
+            return f"rgb{channels}"
+    return "rgb(6, 91, 52)"
+
+
+def winrate_text_color(winrate: float) -> str:
+    return "#17212b" if 0.43 <= winrate < 0.60 else "#ffffff"
+
+
 def display_role(participant: dict) -> str:
     role = participant.get("teamPosition") or participant.get("individualPosition") or "UNKNOWN"
     return ROLE_MAP.get(str(role).upper(), str(role).upper())
@@ -224,12 +250,12 @@ def tracked_combo_section() -> str:
         best = sorted(qualified, key=lambda item: (-item["winrate"], -item["games"], item["players"]))[:10]
         worst = sorted(qualified, key=lambda item: (item["winrate"], -item["games"], item["players"]))[:10]
 
-        def render_combo_rows(items: list[dict[str, object]], accent: str) -> str:
+        def render_combo_rows(items: list[dict[str, object]]) -> str:
             if not items:
                 return '<div class="empty-state">No tracked-player combination meets the minimum sample yet.</div>'
             return "".join(
                 f"""
-                <div class="combo-row" data-rank="{rank:02d}" style="--bar-accent: {accent};">
+                <div class="combo-row" data-rank="{rank:02d}" style="--bar-accent: {winrate_color(float(item['winrate']))};">
                   <div class="combo-label"><span>{escape(' + '.join(item['players']))}</span><small>{item['wins']}-{item['games'] - item['wins']}, {item['games']} games</small></div>
                   <div class="bar-track"><div class="bar-fill" style="width: {item['winrate'] * 100:.2f}%"></div></div>
                   <b>{item['winrate'] * 100:.1f}%</b>
@@ -244,8 +270,8 @@ def tracked_combo_section() -> str:
             <section class="chart-panel combo-comparison-panel">
               <div class="combo-comparison-heading"><h3>{label}</h3><p class="chart-note">Minimum sample: {minimum_games[size]} games together</p></div>
               <div class="combo-compare-grid">
-                <div class="combo-compare-column combo-compare-best"><h4>Best {label}</h4><div class="combo-chart">{render_combo_rows(best, '#62a8ff')}</div></div>
-                <div class="combo-compare-column combo-compare-worst"><h4>Worst {label}</h4><div class="combo-chart">{render_combo_rows(worst, '#ff6f81')}</div></div>
+                <div class="combo-compare-column combo-compare-best"><h4>Best {label}</h4><div class="combo-chart">{render_combo_rows(best)}</div></div>
+                <div class="combo-compare-column combo-compare-worst"><h4>Worst {label}</h4><div class="combo-chart">{render_combo_rows(worst)}</div></div>
               </div>
             </section>
             """
@@ -268,6 +294,8 @@ def render_with_qualification_thresholds() -> None:
     spec.loader.exec_module(renderer)
     renderer.MIN_CHAMPION_GAMES = 10
     renderer.MIN_COMBO_GAMES = 10
+    renderer.heat_color = winrate_color
+    renderer.heat_text_color = winrate_text_color
     renderer.build_dashboard(EXPORTED_HISTORY, OUTPUT_DIRECTORY / "index.html")
 
 
