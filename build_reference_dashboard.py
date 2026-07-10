@@ -8,6 +8,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from html import escape
+from itertools import combinations
 from pathlib import Path
 
 
@@ -163,6 +164,57 @@ def roster_only_sections() -> tuple[str, str]:
     return profiles, matches
 
 
+def tracked_combo_section() -> str:
+    rows, _by_player = tracked_match_log()
+    minimum_games = {2: 10, 3: 5, 4: 3, 5: 2}
+    panels = []
+    for size in range(2, 6):
+        records: dict[tuple[str, ...], dict[str, int]] = {}
+        for row in rows:
+            for group in combinations(sorted(row["players"]), size):
+                record = records.setdefault(group, {"games": 0, "wins": 0})
+                record["games"] += 1
+                record["wins"] += int(row["result"] == "Win")
+        qualified = [
+            {
+                "players": group,
+                "games": record["games"],
+                "wins": record["wins"],
+                "winrate": record["wins"] / record["games"],
+            }
+            for group, record in records.items()
+            if record["games"] >= minimum_games[size]
+        ]
+        qualified.sort(key=lambda item: (-item["winrate"], -item["games"], item["players"]))
+        combo_rows = "".join(
+            f"""
+            <div class="combo-row" data-rank="{rank:02d}" style="--bar-accent: #62a8ff;">
+              <div class="combo-label"><span>{escape(' + '.join(item['players']))}</span><small>{item['wins']}-{item['games'] - item['wins']}, {item['games']} games</small></div>
+              <div class="bar-track"><div class="bar-fill" style="width: {item['winrate'] * 100:.2f}%"></div></div>
+              <b>{item['winrate'] * 100:.1f}%</b>
+            </div>
+            """
+            for rank, item in enumerate(qualified[:10], start=1)
+        )
+        if not combo_rows:
+            combo_rows = '<div class="empty-state">No tracked-player combination meets the minimum sample yet.</div>'
+        label = {2: "Duos", 3: "Trios", 4: "Four-player teams", 5: "Five-player teams"}[size]
+        panels.append(
+            f"""
+            <section class="chart-panel combo-comparison-panel">
+              <div class="combo-comparison-heading"><h3>Best {label}</h3><p class="chart-note">Minimum sample: {minimum_games[size]} games</p></div>
+              <div class="combo-chart">{combo_rows}</div>
+            </section>
+            """
+        )
+    return f"""
+    <section id="combos" class="section">
+      <div class="section-title"><div><h2>Best Tracked-Player Combos</h2><p class="note">Win-rate leaders when these tracked players appeared together on the same Ranked Flex team.</p></div></div>
+      <div class="combo-comparison-stack">{''.join(panels)}</div>
+    </section>
+    """
+
+
 def render_with_qualification_thresholds() -> None:
     """Run the proven renderer while applying roster dashboard thresholds."""
     spec = importlib.util.spec_from_file_location("reference_dashboard_renderer", REFERENCE_GENERATOR)
@@ -241,8 +293,9 @@ def main() -> None:
         unplayed_end = rendered.find("</section>", unplayed_start)
         if unplayed_end >= 0:
             rendered = rendered[:unplayed_start] + rendered[unplayed_end + len("</section>"):]
-    rendered = rendered.replace("</nav>", '<a href="#matches">Matches</a></nav>', 1)
-    rendered = rendered.replace("</main>", matches + "</main>", 1)
+    tracked_combos = tracked_combo_section()
+    rendered = rendered.replace("</nav>", '<a href="#combos">Combos</a><a href="#matches">Matches</a></nav>', 1)
+    rendered = rendered.replace("</main>", tracked_combos + matches + "</main>", 1)
     rendered = rendered.replace(
         "</head>",
         "<style>.roster-match-ids{margin:20px 0}.match-id-list{max-width:800px;padding:10px 0;color:#9fb9d1;line-height:1.7;word-break:break-all}.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}</style></head>",
