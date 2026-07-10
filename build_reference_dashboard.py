@@ -11,6 +11,7 @@ from html import escape
 from itertools import combinations
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from collections import Counter
 
 
 DATABASE = Path("data/riot_cache.sqlite3")
@@ -294,6 +295,47 @@ def tracked_combo_section() -> str:
     """
 
 
+def tracked_champion_history_section() -> str:
+    rows, _by_player = tracked_match_log()
+    champions: dict[str, dict[str, object]] = {}
+    for row in rows:
+        for pair in row["champions"]:
+            player, champion = pair.split(": ", 1)
+            record = champions.setdefault(
+                champion,
+                {"players": Counter(), "matches": [], "wins": 0},
+            )
+            record["players"][player] += 1
+            record["matches"].append((row["number"], row["id"]))
+            record["wins"] += int(row["result"] == "Win")
+
+    table_rows = []
+    for champion, record in sorted(champions.items()):
+        matches = record["matches"]
+        games = len(matches)
+        wins = int(record["wins"])
+        players = ", ".join(
+            f"{escape(name)} ({count})"
+            for name, count in record["players"].most_common()
+        )
+        match_links = ", ".join(
+            f'<a href="https://www.leagueofgraphs.com/match/euw/{escape(str(match_id).removeprefix("EUW1_"))}" target="_blank" rel="noopener noreferrer">Match {number}</a>'
+            for number, match_id in matches
+        )
+        table_rows.append(
+            f'<tr data-champion-history-search="{escape(champion)} {players}"><td><strong>{escape(champion)}</strong></td>'
+            f'<td>{players}</td><td>{wins}-{games - wins}</td><td>{wins / games * 100:.1f}%</td>'
+            f'<td><details><summary>{games} linked match{"es" if games != 1 else ""}</summary><div class="champion-match-links">{match_links}</div></details></td></tr>'
+        )
+    return f"""
+    <section id="champion-history" class="section">
+      <div class="section-title"><div><h2>Tracked Champion History</h2><p class="note">Roster-only champion pilots and their linked match history.</p></div></div>
+      <section class="table-panel"><div class="section-heading"><h3>Champion pilots</h3><input id="champion-history-search" class="table-search" type="search" placeholder="Search champion or player"></div><div class="table-wrap"><table class="sortable-table"><thead><tr><th>Champion</th><th>Tracked players (games)</th><th>Record</th><th>Win rate</th><th>Match history</th></tr></thead><tbody>{''.join(table_rows)}</tbody></table></div></section>
+    </section>
+    <script>document.getElementById('champion-history-search')?.addEventListener('input', event => {{ const query = event.target.value.toLowerCase(); document.querySelectorAll('[data-champion-history-search]').forEach(row => row.hidden = !row.dataset.championHistorySearch.toLowerCase().includes(query)); }});</script>
+    """
+
+
 def render_with_qualification_thresholds() -> None:
     """Run the proven renderer while applying roster dashboard thresholds."""
     spec = importlib.util.spec_from_file_location("reference_dashboard_renderer", REFERENCE_GENERATOR)
@@ -304,6 +346,19 @@ def render_with_qualification_thresholds() -> None:
     spec.loader.exec_module(renderer)
     renderer.MIN_CHAMPION_GAMES = 10
     renderer.MIN_COMBO_GAMES = 10
+    original_aggregate = renderer.aggregate
+    renderer.aggregate = lambda appearances, keys: original_aggregate(
+        [row for row in appearances if not renderer.is_spotlight_excluded_player(row.name)],
+        keys,
+    )
+    original_role_champion_pool = renderer.role_champion_pool_rows
+    renderer.role_champion_pool_rows = lambda appearances: original_role_champion_pool(
+        [row for row in appearances if not renderer.is_spotlight_excluded_player(row.name)]
+    )
+    original_player_role_champion_pool = renderer.player_role_champion_pool_rows
+    renderer.player_role_champion_pool_rows = lambda appearances: original_player_role_champion_pool(
+        [row for row in appearances if not renderer.is_spotlight_excluded_player(row.name)]
+    )
     renderer.heat_color = winrate_color
     renderer.heat_text_color = winrate_text_color
     original_horizontal_pool = renderer.champion_pool_horizontal_svg
@@ -399,11 +454,12 @@ def main() -> None:
         if unplayed_end >= 0:
             rendered = rendered[:unplayed_start] + rendered[unplayed_end + len("</section>"):]
     tracked_combos = tracked_combo_section()
+    champion_history = tracked_champion_history_section()
     rendered = rendered.replace("</nav>", '<a href="#combos">Combos</a><a href="#matches">Matches</a></nav>', 1)
-    rendered = rendered.replace("</main>", tracked_combos + matches + "</main>", 1)
+    rendered = rendered.replace("</main>", tracked_combos + champion_history + matches + "</main>", 1)
     rendered = rendered.replace(
         "</head>",
-        "<style>.roster-match-ids{margin:20px 0}.match-id-list{max-width:800px;padding:10px 0;color:#9fb9d1;line-height:1.7;word-break:break-all}.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}</style></head>",
+        "<style>.roster-match-ids{margin:20px 0}.match-id-list{max-width:800px;padding:10px 0;color:#9fb9d1;line-height:1.7;word-break:break-all}.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}.champion-match-links{max-width:620px;padding:8px 0;line-height:1.8}.champion-match-links a{white-space:nowrap}</style></head>",
         1,
     )
     index_path.write_text(rendered, encoding="utf-8")
