@@ -166,7 +166,7 @@ def roster_only_sections() -> tuple[str, str]:
 
 def tracked_combo_section() -> str:
     rows, _by_player = tracked_match_log()
-    minimum_games = {2: 10, 3: 5, 4: 3, 5: 2}
+    minimum_games = {2: 20, 3: 15, 4: 15, 5: 10}
     panels = []
     for size in range(2, 6):
         records: dict[tuple[str, ...], dict[str, int]] = {}
@@ -185,25 +185,32 @@ def tracked_combo_section() -> str:
             for group, record in records.items()
             if record["games"] >= minimum_games[size]
         ]
-        qualified.sort(key=lambda item: (-item["winrate"], -item["games"], item["players"]))
-        combo_rows = "".join(
-            f"""
-            <div class="combo-row" data-rank="{rank:02d}" style="--bar-accent: #62a8ff;">
-              <div class="combo-label"><span>{escape(' + '.join(item['players']))}</span><small>{item['wins']}-{item['games'] - item['wins']}, {item['games']} games</small></div>
-              <div class="bar-track"><div class="bar-fill" style="width: {item['winrate'] * 100:.2f}%"></div></div>
-              <b>{item['winrate'] * 100:.1f}%</b>
-            </div>
-            """
-            for rank, item in enumerate(qualified[:10], start=1)
-        )
-        if not combo_rows:
-            combo_rows = '<div class="empty-state">No tracked-player combination meets the minimum sample yet.</div>'
+        best = sorted(qualified, key=lambda item: (-item["winrate"], -item["games"], item["players"]))[:10]
+        worst = sorted(qualified, key=lambda item: (item["winrate"], -item["games"], item["players"]))[:10]
+
+        def render_combo_rows(items: list[dict[str, object]], accent: str) -> str:
+            if not items:
+                return '<div class="empty-state">No tracked-player combination meets the minimum sample yet.</div>'
+            return "".join(
+                f"""
+                <div class="combo-row" data-rank="{rank:02d}" style="--bar-accent: {accent};">
+                  <div class="combo-label"><span>{escape(' + '.join(item['players']))}</span><small>{item['wins']}-{item['games'] - item['wins']}, {item['games']} games</small></div>
+                  <div class="bar-track"><div class="bar-fill" style="width: {item['winrate'] * 100:.2f}%"></div></div>
+                  <b>{item['winrate'] * 100:.1f}%</b>
+                </div>
+                """
+                for rank, item in enumerate(items, start=1)
+            )
+
         label = {2: "Duos", 3: "Trios", 4: "Four-player teams", 5: "Five-player teams"}[size]
         panels.append(
             f"""
             <section class="chart-panel combo-comparison-panel">
-              <div class="combo-comparison-heading"><h3>Best {label}</h3><p class="chart-note">Minimum sample: {minimum_games[size]} games</p></div>
-              <div class="combo-chart">{combo_rows}</div>
+              <div class="combo-comparison-heading"><h3>{label}</h3><p class="chart-note">Minimum sample: {minimum_games[size]} games together</p></div>
+              <div class="combo-compare-grid">
+                <div class="combo-compare-column combo-compare-best"><h4>Best {label}</h4><div class="combo-chart">{render_combo_rows(best, '#62a8ff')}</div></div>
+                <div class="combo-compare-column combo-compare-worst"><h4>Worst {label}</h4><div class="combo-chart">{render_combo_rows(worst, '#ff6f81')}</div></div>
+              </div>
             </section>
             """
         )
