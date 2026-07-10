@@ -19,7 +19,7 @@ REFERENCE_GENERATOR = Path(r"C:\Users\brand\Documents\Coding\Python\Custom_match
 ROLE_MAP = {"MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUPP"}
 VALID_ROLES = {"TOP", "JUNGLE", "MID", "BOT", "SUPP"}
 MINIMUM_GAME_SECONDS = 10 * 60
-SHARED_NAV_HTML = """<nav>
+SHARED_NAV_HTML = """<nav class="shared-dashboard-nav">
     <a href="index.html#overview">Dashboard</a>
     <a href="index.html#players">Players</a>
     <a href="index.html#champions">Champions</a>
@@ -27,9 +27,21 @@ SHARED_NAV_HTML = """<nav>
     <a href="index.html#matches">Matches</a>
     <a href="index_teams.html#teams">Teams</a>
     <a href="index_showcases.html">Showcases</a>
-    <a href="index_head_to_head.html#head-to-head">Head to Head</a>
     <a href="index_experimental.html#custom-meta">Experimental</a>
   </nav>"""
+SHARED_NAV_CSS = """<style id="shared-dashboard-nav-style">
+  nav.shared-dashboard-nav {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    padding: 12px max(24px, calc((100vw - 1320px) / 2));
+    background: #0f1721; border-bottom: 1px solid #243142;
+    position: sticky; top: 0; z-index: 100; width: 100%;
+  }
+  nav.shared-dashboard-nav a {
+    color: #e8edf3; text-decoration: none; font-weight: 700;
+    font-size: 0.91rem; padding: 8px 10px; border-radius: 6px;
+  }
+  nav.shared-dashboard-nav a:hover { background: #1a2633; }
+</style>"""
 
 
 def display_role(participant: dict) -> str:
@@ -348,11 +360,13 @@ def main() -> None:
     for page_path in OUTPUT_DIRECTORY.glob("*.html"):
         page = page_path.read_text(encoding="utf-8")
         page = re.sub(r'\s*<div class="header-actions"[^>]*>.*?</div>', "", page, count=1, flags=re.DOTALL)
+        page = re.sub(r'\s*<a class="hidden-page-link"[^>]*></a>', "", page)
         page = re.sub(r'\s*<a href="(?:index_draft_coach\.html#draft-coach|#draft-coach)">Draft Coach</a>', "", page)
         page = re.sub(r'\s*<a href="(?:index_random_pool\.html#random-champion-pool|#random-champion-pool)">Random Pool</a>', "", page)
         page = re.sub(r'<nav>.*?</nav>', SHARED_NAV_HTML, page, count=1, flags=re.DOTALL)
+        page = page.replace("</head>", SHARED_NAV_CSS + "</head>", 1)
         page_path.write_text(page, encoding="utf-8")
-    for removed_page in ("index_draft_coach.html", "index_random_pool.html"):
+    for removed_page in ("index_draft_coach.html", "index_random_pool.html", "index_head_to_head.html"):
         (OUTPUT_DIRECTORY / removed_page).unlink(missing_ok=True)
     print(f"Rendered {count} eligible flex games in reference dashboard style.")
 

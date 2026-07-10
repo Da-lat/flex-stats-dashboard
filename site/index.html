@@ -2353,9 +2353,20 @@
       th, td { padding: 6px 5px; }
     }
   </style>
-<style>.roster-match-ids{margin:20px 0}.match-id-list{max-width:800px;padding:10px 0;color:#9fb9d1;line-height:1.7;word-break:break-all}.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}</style></head>
+<style>.roster-match-ids{margin:20px 0}.match-id-list{max-width:800px;padding:10px 0;color:#9fb9d1;line-height:1.7;word-break:break-all}.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}</style><style id="shared-dashboard-nav-style">
+  nav.shared-dashboard-nav {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    padding: 12px max(24px, calc((100vw - 1320px) / 2));
+    background: #0f1721; border-bottom: 1px solid #243142;
+    position: sticky; top: 0; z-index: 100; width: 100%;
+  }
+  nav.shared-dashboard-nav a {
+    color: #e8edf3; text-decoration: none; font-weight: 700;
+    font-size: 0.91rem; padding: 8px 10px; border-radius: 6px;
+  }
+  nav.shared-dashboard-nav a:hover { background: #1a2633; }
+</style></head>
 <body>
-  <a class="hidden-page-link" href="index_head_to_head.html#head-to-head" aria-label="Head to Head"></a>
   <header>
     <div class="topline">
       <div>
@@ -2365,7 +2376,7 @@
     
     </div>
   </header>
-  <nav>
+  <nav class="shared-dashboard-nav">
     <a href="index.html#overview">Dashboard</a>
     <a href="index.html#players">Players</a>
     <a href="index.html#champions">Champions</a>
@@ -2373,7 +2384,6 @@
     <a href="index.html#matches">Matches</a>
     <a href="index_teams.html#teams">Teams</a>
     <a href="index_showcases.html">Showcases</a>
-    <a href="index_head_to_head.html#head-to-head">Head to Head</a>
     <a href="index_experimental.html#custom-meta">Experimental</a>
   </nav>
   <main>
