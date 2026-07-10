@@ -17,6 +17,7 @@ from collections import Counter
 DATABASE = Path("data/riot_cache.sqlite3")
 EXPORTED_HISTORY = Path("data/reference_match_history.json")
 OUTPUT_DIRECTORY = Path("site")
+ROSTER_FILE = Path("players.txt")
 REFERENCE_GENERATOR = Path(r"C:\Users\brand\Documents\Coding\Python\Custom_match_dashboards\data_analysis_customs.py")
 ROLE_MAP = {"MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUPP"}
 VALID_ROLES = {"TOP", "JUNGLE", "MID", "BOT", "SUPP"}
@@ -72,6 +73,14 @@ def winrate_color(winrate: float) -> str:
 
 def winrate_text_color(winrate: float) -> str:
     return "#17212b" if 0.43 <= winrate < 0.60 else "#ffffff"
+
+
+def tracked_real_names() -> set[str]:
+    return {
+        line.split("|", 1)[1].strip()
+        for line in ROSTER_FILE.read_text(encoding="utf-8-sig").splitlines()
+        if line.strip() and not line.lstrip().startswith("#") and "|" in line
+    }
 
 
 def display_role(participant: dict) -> str:
@@ -346,6 +355,20 @@ def render_with_qualification_thresholds() -> None:
     spec.loader.exec_module(renderer)
     renderer.MIN_CHAMPION_GAMES = 10
     renderer.MIN_COMBO_GAMES = 10
+    # Enforce the roster boundary at the renderer input so every downstream
+    # calculation (awards, charts, teams, showcases and experimental metrics)
+    # receives tracked appearances only. Raw Riot payloads remain intact in
+    # SQLite; this filter controls dashboard analytics and presentation.
+    original_load_appearances = renderer.load_appearances
+    allowed_names = tracked_real_names()
+    def load_tracked_appearances(*args, **kwargs):
+        raw_matches, appearances = original_load_appearances(*args, **kwargs)
+        return raw_matches, [
+            row
+            for row in appearances
+            if row.name in allowed_names
+        ]
+    renderer.load_appearances = load_tracked_appearances
     original_aggregate = renderer.aggregate
     renderer.aggregate = lambda appearances, keys: original_aggregate(
         [row for row in appearances if not renderer.is_spotlight_excluded_player(row.name)],
@@ -491,6 +514,12 @@ def main() -> None:
         page_path.write_text(page, encoding="utf-8")
     for removed_page in ("index_draft_coach.html", "index_random_pool.html", "index_head_to_head.html"):
         (OUTPUT_DIRECTORY / removed_page).unlink(missing_ok=True)
+    forbidden_site_markers = ("anonymous opposition", "tracked_teammate", "untracked player")
+    for page_path in OUTPUT_DIRECTORY.glob("*.html"):
+        page_text = page_path.read_text(encoding="utf-8").lower()
+        found = [marker for marker in forbidden_site_markers if marker in page_text]
+        if found:
+            raise RuntimeError(f"Roster-boundary audit failed for {page_path}: {found}")
     print(f"Rendered {count} eligible flex games in reference dashboard style.")
 
 
