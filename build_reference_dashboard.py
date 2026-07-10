@@ -142,7 +142,7 @@ def roster_only_sections() -> tuple[str, str]:
     </section>
     """
     log_rows = "".join(
-        f"<tr id=\"match-{row['number']}\" data-match-search=\"match {row['number']} {escape(str(row['id']))} {escape(' '.join(row['players']))}\"><td>Match {row['number']}</td><td class=\"match-id\">{escape(str(row['id']))}</td><td>{escape(str(row['played']))}</td><td class=\"{'result-win' if row['result'] == 'Win' else 'result-loss'}\">{escape(str(row['result']))}</td><td>{escape(', '.join(row['players']))}</td><td>{row['minutes']}</td></tr>"
+        f"<tr id=\"match-{row['number']}\" data-match-search=\"match {row['number']} {escape(str(row['id']))} {escape(' '.join(row['players']))}\"><td>Match {row['number']}</td><td class=\"match-id\"><a href=\"https://www.leagueofgraphs.com/match/euw/{escape(str(row['id']).removeprefix('EUW1_'))}\" target=\"_blank\" rel=\"noopener noreferrer\">{escape(str(row['id']))}</a></td><td>{escape(str(row['played']))}</td><td class=\"{'result-win' if row['result'] == 'Win' else 'result-loss'}\">{escape(str(row['result']))}</td><td>{escape(', '.join(row['players']))}</td><td>{row['minutes']}</td></tr>"
         for row in rows
     )
     matches = f"""
@@ -210,6 +210,15 @@ def main() -> None:
     rendered = re.sub(
         r"Match (\d+)(?!\s*[·#])",
         lambda match: f"Match {match.group(1)} · {match_id_by_number.get(int(match.group(1)), 'Riot ID unavailable')}",
+        rendered,
+    )
+    rendered = re.sub(
+        r'href="#match-(\d+)"\s+data-award-match-id="\d+"',
+        lambda match: (
+            f'href="https://www.leagueofgraphs.com/match/euw/'
+            f'{match_id_by_number.get(int(match.group(1)), "").removeprefix("EUW1_")}" '
+            f'target="_blank" rel="noopener noreferrer"'
+        ),
         rendered,
     )
     roster_count = len(tracked_match_log()[1])
