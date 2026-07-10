@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from html import escape
 from itertools import combinations
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 DATABASE = Path("data/riot_cache.sqlite3")
@@ -19,6 +20,8 @@ REFERENCE_GENERATOR = Path(r"C:\Users\brand\Documents\Coding\Python\Custom_match
 ROLE_MAP = {"MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUPP"}
 VALID_ROLES = {"TOP", "JUNGLE", "MID", "BOT", "SUPP"}
 MINIMUM_GAME_SECONDS = 10 * 60
+CHAMPION_POOL_DISPLAY_LIMIT = 15
+UK_TIMEZONE = ZoneInfo("Europe/London")
 SHARED_NAV_HTML = """<nav class="shared-dashboard-nav">
     <a href="index.html#overview">Dashboard</a>
     <a href="index.html#players">Players</a>
@@ -185,7 +188,7 @@ def tracked_match_log() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
         rows.append({
             "id": match_id,
             "number": match_numbers.get(match_id, 0),
-            "played": datetime.fromtimestamp(timestamp / 1000, timezone.utc).strftime("%d %b %Y, %H:%M UTC") if timestamp else "-",
+            "played": datetime.fromtimestamp(timestamp / 1000, UK_TIMEZONE).strftime("%d %b %Y, %H:%M %Z") if timestamp else "-",
             "sort": timestamp or 0,
             "players": names,
             "champions": [f"{name}: {champion}" for name, champion in tracked_picks],
@@ -296,6 +299,14 @@ def render_with_qualification_thresholds() -> None:
     renderer.MIN_COMBO_GAMES = 10
     renderer.heat_color = winrate_color
     renderer.heat_text_color = winrate_text_color
+    original_horizontal_pool = renderer.champion_pool_horizontal_svg
+    original_vertical_pool = renderer.champion_pool_vertical_svg
+    renderer.champion_pool_horizontal_svg = lambda player, rows: original_horizontal_pool(
+        player, rows[:CHAMPION_POOL_DISPLAY_LIMIT]
+    )
+    renderer.champion_pool_vertical_svg = lambda player, rows: original_vertical_pool(
+        player, rows[:CHAMPION_POOL_DISPLAY_LIMIT]
+    )
     renderer.build_dashboard(EXPORTED_HISTORY, OUTPUT_DIRECTORY / "index.html")
 
 
@@ -312,6 +323,10 @@ def main() -> None:
     index_path = OUTPUT_DIRECTORY / "index.html"
     rendered = index_path.read_text(encoding="utf-8")
     rendered = rendered.replace("LoL Customs Dashboard", "League Flex Dashboard")
+    rendered = rendered.replace(
+        "Browse one player at a time. Unique-pick rate is unique champions divided by games, so champion pool depth is not just raw volume.",
+        f"Browse one player at a time. Charts show each player's {CHAMPION_POOL_DISPLAY_LIMIT} most-played champions; the summary still counts their full pool.",
+    )
     rendered = re.sub(r'\s*<div class="header-actions"[^>]*>.*?</div>', "", rendered, count=1, flags=re.DOTALL)
     rendered = re.sub(r'\s*<a href="#match-history">Matches</a>', "", rendered, count=1)
     rendered = re.sub(r'\s*<a href="#combos">Combos</a>', "", rendered, count=1)
