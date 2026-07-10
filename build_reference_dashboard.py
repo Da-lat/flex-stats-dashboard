@@ -374,6 +374,18 @@ def main() -> None:
         ),
         rendered,
     )
+    # Keep Riot IDs in award-card destinations, but not in their visible copy
+    # or accessible label. Present the supporting detail as one clean timeline.
+    rendered = re.sub(
+        r"Match (\d+)\s+[^A-Za-z0-9\s]\s+EUW1_\d+",
+        r"Match \1",
+        rendered,
+    )
+    rendered = re.sub(
+        r"\s+-\s+Match (\d+),\s*([^,<]+),\s*(Win|Loss)(?=</small>)",
+        r" &middot; Match \1 &middot; \2 &middot; \3",
+        rendered,
+    )
     roster_count = len(tracked_match_log()[1])
     rendered = re.sub(
         r'(<span>Players</span>\s*<strong>)\d+(</strong>\s*<small>Unique real-name entries</small>)',
