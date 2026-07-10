@@ -17,11 +17,20 @@ EXPORTED_HISTORY = Path("data/reference_match_history.json")
 OUTPUT_DIRECTORY = Path("site")
 REFERENCE_GENERATOR = Path(r"C:\Users\brand\Documents\Coding\Python\Custom_match_dashboards\data_analysis_customs.py")
 ROLE_MAP = {"MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUPP"}
+VALID_ROLES = {"TOP", "JUNGLE", "MID", "BOT", "SUPP"}
+MINIMUM_GAME_SECONDS = 10 * 60
 
 
 def display_role(participant: dict) -> str:
     role = participant.get("teamPosition") or participant.get("individualPosition") or "UNKNOWN"
     return ROLE_MAP.get(str(role).upper(), str(role).upper())
+
+
+def is_meaningful_match(info: dict) -> bool:
+    if int(info.get("gameDuration", 0) or 0) < MINIMUM_GAME_SECONDS:
+        return False
+    participants = info.get("participants", [])
+    return len(participants) == 10 and all(display_role(participant) in VALID_ROLES for participant in participants)
 
 
 def participant_name(participant: dict, tracked: dict[str, str]) -> str:
@@ -46,6 +55,8 @@ def export_match_history() -> int:
     matches = []
     for payload in payloads:
         metadata, info = payload.get("metadata", {}), payload.get("info", {})
+        if not is_meaningful_match(info):
+            continue
         teams: dict[int, list[dict]] = {}
         for participant in info.get("participants", []):
             teams.setdefault(participant.get("teamId"), []).append(participant)
@@ -104,6 +115,8 @@ def tracked_match_log() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
     rows, by_player = [], {name: [] for name in set(tracked.values())}
     for payload in payloads:
         info = payload.get("info", {})
+        if not is_meaningful_match(info):
+            continue
         teams: dict[int, list[dict]] = {}
         for participant in info.get("participants", []):
             teams.setdefault(participant.get("teamId"), []).append(participant)
