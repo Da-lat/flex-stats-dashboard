@@ -2075,6 +2075,18 @@ def main() -> None:
         rendered,
         count=1,
     )
+    match_rows = tracked_match_log()
+    wins = sum(row["result"] == "Win" for row in match_rows)
+    losses = len(match_rows) - wins
+    overall_winrate = 100 * wins / max(1, len(match_rows))
+    rendered = re.sub(
+        r'<article class="metric-card">\s*<span>Busiest Day</span>.*?</article>',
+        '<article class="metric-card"><span>Overall Win Rate</span>'
+        f'<strong>{overall_winrate:.1f}%</strong><small>{wins}-{losses} record across all eligible games</small></article>',
+        rendered,
+        count=1,
+        flags=re.DOTALL,
+    )
     unplayed_start = rendered.find('<section class="chart-panel unplayed-panel">')
     if unplayed_start >= 0:
         unplayed_end = rendered.find("</section>", unplayed_start)
