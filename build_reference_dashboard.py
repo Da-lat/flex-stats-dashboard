@@ -1583,6 +1583,31 @@ def showcase_kill_participation() -> dict[str, tuple[float, int]]:
     }
 
 
+def showcase_player_highlights() -> dict[str, dict[str, object]]:
+    """Return each player's top three picks and strongest role-relative dimension."""
+    champion_rows: dict[str, Counter] = defaultdict(Counter)
+    for match in tracked_match_log():
+        for participant in match["participant_stats"]:
+            champion_rows[str(participant["name"])][str(participant["champion"])] += 1
+    score_labels = {
+        "combat_score": "Combat", "economy_score": "Economy",
+        "teamplay_score": "Teamplay", "vision_impact_score": "Vision",
+        "utility_score": "Utility", "objective_score": "Objectives",
+    }
+    scores = role_normalized_player_scores()
+    output = {}
+    for name, champions in champion_rows.items():
+        player_id = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
+        player_scores = scores.get(name, {})
+        strongest_key = max(score_labels, key=lambda key: float(player_scores.get(key, 0)))
+        output[player_id] = {
+            "champions": champions.most_common(3),
+            "best_label": score_labels[strongest_key],
+            "best_value": 100 * float(player_scores.get(strongest_key, 0)),
+        }
+    return output
+
+
 def enhance_showcases(showcase_html: str) -> str:
     """Give Showcases a stronger visual identity and add a player-aware share action."""
     showcase_html = showcase_html.replace("LoL Player Showcases", "League Flex Showcases")
@@ -1615,6 +1640,24 @@ def enhance_showcases(showcase_html: str) -> str:
             lambda match, card=card: match.group(1) + card + match.group(2),
             showcase_html, count=1, flags=re.DOTALL,
         )
+    for player_id, highlight in showcase_player_highlights().items():
+        champion_chips = "".join(
+            '<span class="showcase-top-pick">'
+            f'<img src="{escape("https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/" + str(COMMUNITY_DRAGON_ICON_IDS[champion.casefold()]) + ".png" if champion.casefold() in COMMUNITY_DRAGON_ICON_IDS else "https://ddragon.leagueoflegends.com/cdn/" + DATA_DRAGON_VERSION + "/img/champion/" + champion + ".png")}" alt="{escape(champion)}">'
+            f'<b>{escape(champion)}</b><small>{games}g</small></span>'
+            for champion, games in highlight["champions"]
+        )
+        extra = (
+            '<div class="showcase-extra-highlights">'
+            f'<div><span>Top 3 champions</span><div class="showcase-top-picks">{champion_chips}</div></div>'
+            f'<div class="showcase-best-stat"><span>Strongest impact stat</span><b>{escape(str(highlight["best_label"]))}</b>'
+            f'<small>{float(highlight["best_value"]):.1f}/100 role-relative</small></div></div>'
+        )
+        showcase_html = re.sub(
+            rf'(<section class="player-showcase[^>]*data-showcase="{re.escape(player_id)}".*?<article class="showcase-feature">.*?<small>.*?</small>)(\s*</div>\s*</article>)',
+            lambda match, extra=extra: match.group(1) + extra + match.group(2),
+            showcase_html, count=1, flags=re.DOTALL,
+        )
     showcase_html = re.sub(
         r'\s*renderCompareStat\("(?:MVP Score|Role-adjusted MVP)".*?\),',
         '', showcase_html,
@@ -1627,7 +1670,7 @@ def enhance_showcases(showcase_html: str) -> str:
     showcase_html = showcase_html.replace(
         "</head>",
         """<style id="showcase-polish">
-body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transparent 28%),radial-gradient(circle at 88% 38%,#132d27 0,transparent 30%),#080d13}.showcase-model-note{display:inline-block;margin-top:10px!important;padding:7px 11px;border:1px solid #35536a;border-radius:8px;background:#101c28;color:#b8d1e7!important;font-size:.82rem!important}.showcase-model-note b{color:#62dcaa}.showcase-toolbar{backdrop-filter:blur(16px);box-shadow:0 18px 50px #0005}.showcase-fun-controls{display:flex;gap:6px;align-items:center}.showcase-fun-controls button,.showcase-share-button{padding:11px 14px;border:1px solid #354b61;border-radius:9px;color:#eafff7;background:#142131;text-decoration:none;font-weight:900;white-space:nowrap;cursor:pointer}.showcase-fun-controls .random-spotlight,.showcase-share-button{border-color:#48d7a0;background:linear-gradient(135deg,#12684f,#205f94)}.showcase-fun-controls button:hover,.showcase-share-button:hover{transform:translateY(-1px);filter:brightness(1.15)}.showcase-hero{position:relative;border-color:#38536c;box-shadow:0 28px 70px #0007}.showcase-title,.showcase-fingerprint,.showcase-hero-grid{position:relative;z-index:1}.showcase-title h2{text-shadow:0 8px 30px #000}.showcase-kicker{letter-spacing:.12em}.showcase-dna{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.showcase-dna-chip{padding:7px 10px;border:1px solid #38516a;border-radius:999px;background:#0b1622dc;color:#c7dff5;font-size:.78rem;font-weight:800}.showcase-dna-chip b{color:#68e1ad}.showcase-dna-chip.gold{border-color:#8d7437;background:#251f11dd}.showcase-dna-chip.gold b{color:#ffd872}.showcase-roster-rail{display:flex;gap:7px;overflow-x:auto;padding:4px 1px 14px;margin:0 0 14px;scrollbar-width:thin}.showcase-roster-pill{border:1px solid #293b4e;background:#101a26;color:#9ebbd4;border-radius:999px;padding:7px 11px;font-weight:800;cursor:pointer;white-space:nowrap}.showcase-roster-pill.active{color:#07130f;background:#58dba6;border-color:#75ebbc}.player-showcase.active{animation:showcase-in .35s ease-out}@keyframes showcase-in{from{opacity:.3;transform:translateY(8px)}to{opacity:1;transform:none}}.spotlight-spark{position:fixed;z-index:9999;width:8px;height:8px;border-radius:2px;pointer-events:none;animation:spark-fall .9s ease-out forwards}@keyframes spark-fall{to{transform:translate(var(--dx),var(--dy)) rotate(300deg);opacity:0}}@media(max-width:900px){.showcase-toolbar{align-items:stretch}.showcase-fun-controls{order:3}.showcase-count{display:none}}@media(max-width:700px){.showcase-share-button{width:100%;text-align:center}.showcase-fun-controls{width:100%}.random-spotlight{flex:1}}
+body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transparent 28%),radial-gradient(circle at 88% 38%,#132d27 0,transparent 30%),#080d13}.showcase-model-note{display:inline-block;margin-top:10px!important;padding:7px 11px;border:1px solid #35536a;border-radius:8px;background:#101c28;color:#b8d1e7!important;font-size:.82rem!important}.showcase-model-note b{color:#62dcaa}.showcase-toolbar{backdrop-filter:blur(16px);box-shadow:0 18px 50px #0005}.showcase-fun-controls{display:flex;gap:6px;align-items:center}.showcase-fun-controls button,.showcase-share-button{padding:11px 14px;border:1px solid #354b61;border-radius:9px;color:#eafff7;background:#142131;text-decoration:none;font-weight:900;white-space:nowrap;cursor:pointer}.showcase-fun-controls .random-spotlight,.showcase-share-button{border-color:#48d7a0;background:linear-gradient(135deg,#12684f,#205f94)}.showcase-fun-controls button:hover,.showcase-share-button:hover{transform:translateY(-1px);filter:brightness(1.15)}.showcase-hero{position:relative;border-color:#38536c;box-shadow:0 28px 70px #0007}.showcase-title,.showcase-fingerprint,.showcase-hero-grid{position:relative;z-index:1}.showcase-title h2{text-shadow:0 8px 30px #000}.showcase-kicker{letter-spacing:.12em}.showcase-dna{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.showcase-dna-chip{padding:7px 10px;border:1px solid #38516a;border-radius:999px;background:#0b1622dc;color:#c7dff5;font-size:.78rem;font-weight:800}.showcase-dna-chip b{color:#68e1ad}.showcase-dna-chip.gold{border-color:#8d7437;background:#251f11dd}.showcase-dna-chip.gold b{color:#ffd872}.showcase-extra-highlights{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:12px;margin-top:12px;padding-top:12px;border-top:1px solid #2c4053}.showcase-top-picks{display:flex;gap:7px;margin-top:6px}.showcase-top-pick{display:grid!important;grid-template-columns:30px minmax(55px,1fr) auto;align-items:center;gap:6px;padding:4px 7px;border:1px solid #30465b;border-radius:7px;background:#0c1722;min-width:0;flex:1}.showcase-top-pick img{width:30px!important;height:30px!important;border-radius:6px!important}.showcase-top-pick b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.showcase-top-pick small{white-space:nowrap}.showcase-best-stat{display:grid;align-content:center;padding:8px 11px;border:1px solid #3c715f;border-radius:7px;background:#0d1d1a}.showcase-best-stat b{font-size:1.15rem;color:#65dfa9}.showcase-roster-rail{display:flex;gap:7px;overflow-x:auto;padding:4px 1px 14px;margin:0 0 14px;scrollbar-width:thin}.showcase-roster-pill{border:1px solid #293b4e;background:#101a26;color:#9ebbd4;border-radius:999px;padding:7px 11px;font-weight:800;cursor:pointer;white-space:nowrap}.showcase-roster-pill.active{color:#07130f;background:#58dba6;border-color:#75ebbc}.player-showcase.active{animation:showcase-in .35s ease-out}@keyframes showcase-in{from{opacity:.3;transform:translateY(8px)}to{opacity:1;transform:none}}.spotlight-spark{position:fixed;z-index:9999;width:8px;height:8px;border-radius:2px;pointer-events:none;animation:spark-fall .9s ease-out forwards}@keyframes spark-fall{to{transform:translate(var(--dx),var(--dy)) rotate(300deg);opacity:0}}@media(max-width:900px){.showcase-toolbar{align-items:stretch}.showcase-fun-controls{order:3}.showcase-count{display:none}.showcase-extra-highlights{grid-template-columns:1fr}}@media(max-width:700px){.showcase-share-button{width:100%;text-align:center}.showcase-fun-controls{width:100%}.random-spotlight{flex:1}.showcase-top-picks{flex-direction:column}}
 </style></head>""",
         1,
     )
