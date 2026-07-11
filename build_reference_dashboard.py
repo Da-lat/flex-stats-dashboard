@@ -742,128 +742,6 @@ def metric_table_html(
         f'<th data-type="number" title="{escape(label)}">{escape(label)}</th>'
         for _key, label, _decimals, _suffix, _bipolar in columns
     )
-
-
-def experimental_performance_galaxy() -> str:
-    """Render a multi-dimensional roster map as an interactive SVG."""
-    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
-    for record in experimental_player_records():
-        grouped[str(record["name"])].append(record)
-
-    players = []
-    for name, player_records in grouped.items():
-        games = len(player_records)
-        minutes = sum(float(record["minutes"]) for record in player_records)
-        average = lambda fn: sum(float(fn(record) or 0) for record in player_records) / games
-        players.append({
-            "name": name,
-            "games": games,
-            "winrate": sum(bool(record["win"]) for record in player_records) / games,
-            "gold15": average(lambda record: record["diff"][15]["gold"]),
-            "xp15": average(lambda record: record["diff"][15]["xp"]),
-            "cs15": average(lambda record: record["diff"][15]["cs"]),
-            "kp": average(lambda record: record["challenges"].get("killParticipation", 0)),
-            "damage_share": average(lambda record: record["challenges"].get("teamDamagePercentage", 0)),
-            "vision_min": average(lambda record: record["challenges"].get("visionScorePerMinute", 0)),
-            "objective_damage_min": sum(float(record["participant"].get("damageDealtToObjectives", 0) or 0) for record in player_records) / minutes,
-            "objective_involvement": average(lambda record: sum(float(value) for value in record["objectives"].values())),
-        })
-
-    def percentiles(key: str) -> dict[str, float]:
-        ordered = sorted(players, key=lambda player: float(player[key]))
-        return {
-            str(player["name"]): (100 * index / (len(ordered) - 1) if len(ordered) > 1 else 50)
-            for index, player in enumerate(ordered)
-        }
-
-    metric_percentiles = {
-        key: percentiles(key)
-        for key in ("gold15", "xp15", "cs15", "kp", "damage_share", "vision_min", "objective_damage_min", "objective_involvement")
-    }
-    min_games = min(int(player["games"]) for player in players)
-    max_games = max(int(player["games"]) for player in players)
-    points = []
-    for player in players:
-        name = str(player["name"])
-        early = sum(metric_percentiles[key][name] for key in ("gold15", "xp15", "cs15")) / 3
-        impact = sum(metric_percentiles[key][name] for key in ("kp", "damage_share", "vision_min", "objective_damage_min")) / 4
-        objective = metric_percentiles["objective_involvement"][name]
-        game_scale = (int(player["games"]) - min_games) / (max_games - min_games) if max_games > min_games else 0.5
-        radius = 15 + 10 * (game_scale ** 0.5)
-        true_x = 82 + 936 * early / 100
-        true_y = 563 - 463 * impact / 100
-        points.append({**player, "early": early, "impact": impact, "objective": objective, "x": true_x, "y": true_y, "true_x": true_x, "true_y": true_y, "r": radius})
-
-    # Keep bubbles and labels legible while retaining a faint tether to their
-    # exact analytical coordinate.
-    for _iteration in range(90):
-        moved = False
-        for index, first in enumerate(points):
-            for second in points[index + 1:]:
-                dx, dy = second["x"] - first["x"], second["y"] - first["y"]
-                distance = (dx * dx + dy * dy) ** 0.5 or 0.1
-                minimum = first["r"] + second["r"] + 20
-                if distance >= minimum:
-                    continue
-                shift = (minimum - distance) / 2
-                ux, uy = dx / distance, dy / distance
-                first["x"] -= ux * shift
-                first["y"] -= uy * shift
-                second["x"] += ux * shift
-                second["y"] += uy * shift
-                moved = True
-        for point in points:
-            point["x"] = min(1025 - point["r"], max(75 + point["r"], point["x"]))
-            point["y"] = min(575 - point["r"], max(75 + point["r"], point["y"]))
-        if not moved:
-            break
-
-    tethers = []
-    bubbles = []
-    for point in sorted(points, key=lambda item: int(item["games"]), reverse=True):
-        name = str(point["name"])
-        initials = "".join(part[0] for part in name.split())[:2].upper()
-        detail = (
-            f'{name}|{int(point["games"])} games · {100 * float(point["winrate"]):.1f}% WR|'
-            f'Early control {point["early"]:.1f} · Team impact {point["impact"]:.1f} · Objective presence {point["objective"]:.1f}'
-        )
-        tethers.append(
-            f'<line class="galaxy-tether" x1="{point["true_x"]:.1f}" y1="{point["true_y"]:.1f}" x2="{point["x"]:.1f}" y2="{point["y"]:.1f}" />'
-        )
-        bubbles.append(f'''
-          <g class="galaxy-player" tabindex="0" role="img" aria-label="{escape(detail.replace('|', '. '))}" data-galaxy-detail="{escape(detail)}">
-            <circle class="galaxy-objective-ring" cx="{point['x']:.1f}" cy="{point['y']:.1f}" r="{point['r'] + 4:.1f}" style="stroke-width:{2 + 4 * point['objective'] / 100:.1f}px" />
-            <circle class="galaxy-player-core" cx="{point['x']:.1f}" cy="{point['y']:.1f}" r="{point['r']:.1f}" fill="{winrate_color(float(point['winrate']))}" />
-            <text class="galaxy-initials" x="{point['x']:.1f}" y="{point['y'] + 4:.1f}">{escape(initials)}</text>
-            <text class="galaxy-name" x="{point['x']:.1f}" y="{point['y'] + point['r'] + 16:.1f}">{escape(name)}</text>
-          </g>''')
-
-    return f"""
-    <section id="performance-galaxy" class="section galaxy-experiment">
-      <div class="section-title"><div><h2>Flex Performance Galaxy</h2><p class="note">A multi-dimensional map of the tracked roster. Hover or focus a player for their underlying scores.</p></div></div>
-      <div class="galaxy-panel">
-        <div class="galaxy-legend"><span><i class="legend-size"></i>Bubble size: games</span><span><i class="legend-colour"></i>Colour: win rate</span><span><i class="legend-ring"></i>Ring: objective involvement</span></div>
-        <div class="galaxy-stage">
-          <svg class="galaxy-svg" viewBox="0 0 1100 650" role="img" aria-labelledby="galaxy-title galaxy-desc">
-            <title id="galaxy-title">Flex Performance Galaxy</title><desc id="galaxy-desc">Players positioned by early-game control on the horizontal axis and all-round team impact on the vertical axis.</desc>
-            <defs><filter id="galaxy-glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter><linearGradient id="galaxy-axis-gradient" x1="0" x2="1"><stop offset="0" stop-color="#ff6f83"/><stop offset=".5" stop-color="#f1cb68"/><stop offset="1" stop-color="#58d69a"/></linearGradient></defs>
-            <rect class="galaxy-bg" x="58" y="52" width="984" height="548" rx="24" />
-            <rect class="galaxy-quadrant galaxy-q1" x="550" y="52" width="492" height="274" rx="24"/><rect class="galaxy-quadrant galaxy-q2" x="58" y="52" width="492" height="274" rx="24"/><rect class="galaxy-quadrant galaxy-q3" x="58" y="326" width="492" height="274" rx="24"/><rect class="galaxy-quadrant galaxy-q4" x="550" y="326" width="492" height="274" rx="24"/>
-            <g class="galaxy-grid"><line x1="550" y1="52" x2="550" y2="600"/><line x1="58" y1="326" x2="1042" y2="326"/>{''.join(f'<line x1="{58 + step * 98.4:.1f}" y1="52" x2="{58 + step * 98.4:.1f}" y2="600"/>' for step in range(1, 10) if step != 5)}{''.join(f'<line x1="58" y1="{52 + step * 54.8:.1f}" x2="1042" y2="{52 + step * 54.8:.1f}"/>' for step in range(1, 10) if step != 5)}</g>
-            <text class="galaxy-quadrant-label" x="78" y="82">TEAM ENABLER</text><text class="galaxy-quadrant-label" x="1022" y="82" text-anchor="end">COMPLETE CARRY</text><text class="galaxy-quadrant-label" x="78" y="582">LOW-RESOURCE ROLE</text><text class="galaxy-quadrant-label" x="1022" y="582" text-anchor="end">LANE CATALYST</text>
-            <g>{''.join(tethers)}</g><g>{''.join(bubbles)}</g>
-            <line class="galaxy-x-axis" x1="82" y1="618" x2="1018" y2="618"/><text class="galaxy-axis-label" x="550" y="643" text-anchor="middle">EARLY-GAME CONTROL →</text><text class="galaxy-axis-label galaxy-y-label" x="22" y="326" text-anchor="middle" transform="rotate(-90 22 326)">ALL-ROUND TEAM IMPACT →</text>
-          </svg>
-          <div id="galaxy-tooltip" class="galaxy-tooltip" aria-hidden="true"><strong></strong><span></span><small></small></div>
-        </div>
-      </div>
-    </section>
-    <style id="performance-galaxy-style">
-      .galaxy-panel{{position:relative;overflow:hidden;padding:14px;background:radial-gradient(circle at 72% 18%,rgba(77,202,160,.12),transparent 28%),radial-gradient(circle at 18% 78%,rgba(98,168,255,.12),transparent 30%),#0e1824;border:1px solid #2c3e52;border-radius:14px;box-shadow:0 22px 60px rgba(0,0,0,.28)}}
-      .galaxy-legend{{display:flex;gap:20px;flex-wrap:wrap;padding:5px 8px 12px;color:#a9c9e8;font-size:.82rem;font-weight:800}}.galaxy-legend span{{display:flex;align-items:center;gap:7px}}.galaxy-legend i{{display:inline-block;width:18px;height:18px;border-radius:50%}}.legend-size{{background:#62a8ff;box-shadow:0 0 0 4px rgba(98,168,255,.16)}}.legend-colour{{background:linear-gradient(135deg,#d54f61,#e8c55e,#48c98b)}}.legend-ring{{border:3px solid #69d9d0}}
-      .galaxy-stage{{position:relative;max-width:1180px;margin:auto}}.galaxy-svg{{display:block;width:100%;height:auto;min-height:480px}}.galaxy-bg{{fill:#0b1420;stroke:#30445a;stroke-width:1.4}}.galaxy-quadrant{{opacity:.23}}.galaxy-q1{{fill:#174f46}}.galaxy-q2{{fill:#173b59}}.galaxy-q3{{fill:#332b4d}}.galaxy-q4{{fill:#55401d}}.galaxy-grid line{{stroke:#7390ac;stroke-opacity:.11;stroke-width:1}}.galaxy-quadrant-label{{fill:#7e9bb8;opacity:.48;font-size:13px;font-weight:900;letter-spacing:2px}}.galaxy-x-axis{{stroke:url(#galaxy-axis-gradient);stroke-width:4;stroke-linecap:round}}.galaxy-axis-label{{fill:#cce3f7;font-size:14px;font-weight:900;letter-spacing:1.6px}}.galaxy-tether{{stroke:#9bc4e6;stroke-opacity:.2;stroke-dasharray:3 4}}.galaxy-objective-ring{{fill:none;stroke:#69d9d0;stroke-opacity:.78}}.galaxy-player-core{{stroke:#eaf6ff;stroke-width:1.2;filter:url(#galaxy-glow);transition:transform .2s ease,filter .2s ease;transform-box:fill-box;transform-origin:center}}.galaxy-player{{cursor:pointer;outline:none}}.galaxy-player:hover .galaxy-player-core,.galaxy-player:focus .galaxy-player-core{{transform:scale(1.14);filter:url(#galaxy-glow) brightness(1.18)}}.galaxy-initials{{fill:#07111b;font-weight:1000;font-size:11px;text-anchor:middle;pointer-events:none}}.galaxy-name{{fill:#eaf6ff;font-size:11px;font-weight:850;text-anchor:middle;paint-order:stroke;stroke:#0b1420;stroke-width:4px;stroke-linejoin:round;pointer-events:none}}.galaxy-tooltip{{position:absolute;z-index:5;display:grid;gap:3px;min-width:245px;max-width:320px;padding:12px 14px;background:rgba(8,16,26,.96);border:1px solid #4f6f8f;border-radius:10px;box-shadow:0 16px 36px rgba(0,0,0,.42);pointer-events:none;opacity:0;transform:translateY(5px);transition:opacity .15s ease,transform .15s ease}}.galaxy-tooltip.visible{{opacity:1;transform:none}}.galaxy-tooltip strong{{color:#fff;font-size:1rem}}.galaxy-tooltip span{{color:#67dca5;font-weight:850}}.galaxy-tooltip small{{color:#b6d0e8;line-height:1.4}}@media(max-width:720px){{.galaxy-panel{{padding:8px}}.galaxy-svg{{min-width:850px}}.galaxy-stage{{overflow-x:auto}}.galaxy-legend{{gap:10px}}}}
-    </style>
-    """
     body = []
     for row in rows:
         attrs = row_attributes(row) if row_attributes else ""
@@ -902,6 +780,150 @@ def experimental_performance_galaxy() -> str:
         f'<thead><tr><th>Player</th><th data-type="number">Rank</th><th data-type="number">Overall Score</th><th data-type="number">Games</th>{headers}</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table></div>'
     )
+
+
+def experimental_performance_galaxy() -> str:
+    """Render a multi-dimensional roster map as an interactive SVG."""
+    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for record in experimental_player_records():
+        grouped[str(record["name"])].append(record)
+
+    players = []
+    for name, player_records in grouped.items():
+        games = len(player_records)
+        minutes = sum(float(record["minutes"]) for record in player_records)
+        average = lambda fn: sum(float(fn(record) or 0) for record in player_records) / games
+        players.append({
+            "name": name,
+            "games": games,
+            "winrate": sum(bool(record["win"]) for record in player_records) / games,
+            "gold15": average(lambda record: record["diff"][15]["gold"]),
+            "xp15": average(lambda record: record["diff"][15]["xp"]),
+            "cs15": average(lambda record: record["diff"][15]["cs"]),
+            "kp": average(lambda record: record["challenges"].get("killParticipation", 0)),
+            "damage_share": average(lambda record: record["challenges"].get("teamDamagePercentage", 0)),
+            "kda": average(lambda record: record["challenges"].get("kda", 0)),
+            "deaths": average(lambda record: record["participant"].get("deaths", 0)),
+            "vision_min": average(lambda record: record["challenges"].get("visionScorePerMinute", 0)),
+            "objective_damage_min": sum(float(record["participant"].get("damageDealtToObjectives", 0) or 0) for record in player_records) / minutes,
+            "objective_involvement": average(lambda record: sum(float(value) for value in record["objectives"].values())),
+        })
+
+    def percentiles(key: str, lower_is_better: bool = False) -> dict[str, float]:
+        ordered = sorted(players, key=lambda player: float(player[key]), reverse=lower_is_better)
+        return {
+            str(player["name"]): (100 * index / (len(ordered) - 1) if len(ordered) > 1 else 50)
+            for index, player in enumerate(ordered)
+        }
+
+    metric_percentiles = {
+        key: percentiles(key)
+        for key in ("gold15", "xp15", "cs15", "kp", "damage_share", "kda", "vision_min", "objective_damage_min", "objective_involvement")
+    }
+    metric_percentiles["survival"] = percentiles("deaths", lower_is_better=True)
+    for player in players:
+        name = str(player["name"])
+        categories = {
+            "early": sum(metric_percentiles[key][name] for key in ("gold15", "xp15", "cs15")) / 3,
+            "combat": sum(metric_percentiles[key][name] for key in ("kp", "damage_share", "kda")) / 3,
+            "objectives": sum(metric_percentiles[key][name] for key in ("objective_damage_min", "objective_involvement")) / 2,
+            "vision": metric_percentiles["vision_min"][name],
+            "survival": metric_percentiles["survival"][name],
+        }
+        category_values = list(categories.values())
+        mvp_raw = sum(category_values) / len(category_values)
+        variance = sum((value - mvp_raw) ** 2 for value in category_values) / len(category_values)
+        player.update(categories)
+        player["mvp_raw"] = mvp_raw
+        player["balance_raw"] = -(variance ** 0.5)
+    mvp_percentiles = percentiles("mvp_raw")
+    completeness_percentiles = percentiles("balance_raw")
+    mvp_order = sorted(players, key=lambda player: (-float(player["mvp_raw"]), str(player["name"])))
+    mvp_ranks = {str(player["name"]): rank for rank, player in enumerate(mvp_order, start=1)}
+    min_games = min(int(player["games"]) for player in players)
+    max_games = max(int(player["games"]) for player in players)
+    points = []
+    for player in players:
+        name = str(player["name"])
+        completeness = completeness_percentiles[name]
+        mvp = mvp_percentiles[name]
+        objective = metric_percentiles["objective_involvement"][name]
+        game_scale = (int(player["games"]) - min_games) / (max_games - min_games) if max_games > min_games else 0.5
+        radius = 15 + 10 * (game_scale ** 0.5)
+        true_x = 82 + 936 * completeness / 100
+        true_y = 563 - 463 * mvp / 100
+        points.append({**player, "completeness": completeness, "mvp": mvp, "mvp_rank": mvp_ranks[name], "objective": objective, "x": true_x, "y": true_y, "true_x": true_x, "true_y": true_y, "r": radius})
+
+    # Keep bubbles and labels legible while retaining a faint tether to their
+    # exact analytical coordinate.
+    for _iteration in range(90):
+        moved = False
+        for index, first in enumerate(points):
+            for second in points[index + 1:]:
+                dx, dy = second["x"] - first["x"], second["y"] - first["y"]
+                distance = (dx * dx + dy * dy) ** 0.5 or 0.1
+                minimum = first["r"] + second["r"] + 20
+                if distance >= minimum:
+                    continue
+                shift = (minimum - distance) / 2
+                ux, uy = dx / distance, dy / distance
+                first["x"] -= ux * shift
+                first["y"] -= uy * shift
+                second["x"] += ux * shift
+                second["y"] += uy * shift
+                moved = True
+        for point in points:
+            point["x"] = min(1025 - point["r"], max(75 + point["r"], point["x"]))
+            point["y"] = min(575 - point["r"], max(75 + point["r"], point["y"]))
+        if not moved:
+            break
+
+    tethers = []
+    bubbles = []
+    for point in sorted(points, key=lambda item: int(item["games"]), reverse=True):
+        name = str(point["name"])
+        initials = "".join(part[0] for part in name.split())[:2].upper()
+        detail = (
+            f'{name}|MVP rank #{point["mvp_rank"]} · Score {point["mvp"]:.1f} · {100 * float(point["winrate"]):.1f}% WR|'
+            f'Completeness {point["completeness"]:.1f} · Early {point["early"]:.0f} · Combat {point["combat"]:.0f} · Objectives {point["objectives"]:.0f} · Vision {point["vision"]:.0f} · Survival {point["survival"]:.0f}'
+        )
+        tethers.append(
+            f'<line class="galaxy-tether" x1="{point["true_x"]:.1f}" y1="{point["true_y"]:.1f}" x2="{point["x"]:.1f}" y2="{point["y"]:.1f}" />'
+        )
+        bubbles.append(f'''
+          <g class="galaxy-player" tabindex="0" role="img" aria-label="{escape(detail.replace('|', '. '))}" data-galaxy-detail="{escape(detail)}">
+            <circle class="galaxy-objective-ring" cx="{point['x']:.1f}" cy="{point['y']:.1f}" r="{point['r'] + 4:.1f}" style="stroke-width:{2 + 4 * point['objective'] / 100:.1f}px" />
+            <circle class="galaxy-player-core" cx="{point['x']:.1f}" cy="{point['y']:.1f}" r="{point['r']:.1f}" fill="{winrate_color(float(point['winrate']))}" />
+            <text class="galaxy-initials" x="{point['x']:.1f}" y="{point['y'] + 4:.1f}">{escape(initials)}</text>
+            <text class="galaxy-name" x="{point['x']:.1f}" y="{point['y'] + point['r'] + 16:.1f}">{escape(name)}</text>
+          </g>''')
+
+    return f"""
+    <section id="performance-galaxy" class="section galaxy-experiment">
+      <div class="section-title"><div><h2>Flex MVP Galaxy</h2><p class="note">The clearest all-round MVPs rise to the top-right. Vertical position is overall performance; horizontal position rewards balance across five skill categories.</p></div></div>
+      <div class="galaxy-panel">
+        <div class="galaxy-legend"><span><i class="legend-size"></i>Bubble size: games</span><span><i class="legend-colour"></i>Colour: win rate</span><span><i class="legend-ring"></i>Ring: objective involvement</span></div>
+        <div class="galaxy-stage">
+          <svg class="galaxy-svg" viewBox="0 0 1100 650" role="img" aria-labelledby="galaxy-title galaxy-desc">
+            <title id="galaxy-title">Flex MVP Galaxy</title><desc id="galaxy-desc">Players positioned by all-round completeness on the horizontal axis and overall MVP impact on the vertical axis.</desc>
+            <defs><filter id="galaxy-glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter><linearGradient id="galaxy-axis-gradient" x1="0" x2="1"><stop offset="0" stop-color="#ff6f83"/><stop offset=".5" stop-color="#f1cb68"/><stop offset="1" stop-color="#58d69a"/></linearGradient></defs>
+            <rect class="galaxy-bg" x="58" y="52" width="984" height="548" rx="24" />
+            <rect class="galaxy-quadrant galaxy-q1" x="550" y="52" width="492" height="274" rx="24"/><rect class="galaxy-quadrant galaxy-q2" x="58" y="52" width="492" height="274" rx="24"/><rect class="galaxy-quadrant galaxy-q3" x="58" y="326" width="492" height="274" rx="24"/><rect class="galaxy-quadrant galaxy-q4" x="550" y="326" width="492" height="274" rx="24"/>
+            <g class="galaxy-grid"><line x1="550" y1="52" x2="550" y2="600"/><line x1="58" y1="326" x2="1042" y2="326"/>{''.join(f'<line x1="{58 + step * 98.4:.1f}" y1="52" x2="{58 + step * 98.4:.1f}" y2="600"/>' for step in range(1, 10) if step != 5)}{''.join(f'<line x1="58" y1="{52 + step * 54.8:.1f}" x2="1042" y2="{52 + step * 54.8:.1f}"/>' for step in range(1, 10) if step != 5)}</g>
+            <text class="galaxy-quadrant-label" x="78" y="82">HIGH-IMPACT SPECIALISTS</text><text class="galaxy-quadrant-label galaxy-elite-label" x="1022" y="82" text-anchor="end">ELITE ALL-ROUND MVPS</text><text class="galaxy-quadrant-label" x="78" y="582">DEVELOPMENT ZONE</text><text class="galaxy-quadrant-label" x="1022" y="582" text-anchor="end">BALANCED, LOWER IMPACT</text>
+            <g>{''.join(tethers)}</g><g>{''.join(bubbles)}</g>
+            <line class="galaxy-x-axis" x1="82" y1="618" x2="1018" y2="618"/><text class="galaxy-axis-label" x="550" y="643" text-anchor="middle">ALL-ROUND COMPLETENESS →</text><text class="galaxy-axis-label galaxy-y-label" x="22" y="326" text-anchor="middle" transform="rotate(-90 22 326)">OVERALL MVP IMPACT →</text>
+          </svg>
+          <div id="galaxy-tooltip" class="galaxy-tooltip" aria-hidden="true"><strong></strong><span></span><small></small></div>
+        </div>
+      </div>
+    </section>
+    <style id="performance-galaxy-style">
+      .galaxy-panel{{position:relative;overflow:hidden;padding:14px;background:radial-gradient(circle at 72% 18%,rgba(77,202,160,.12),transparent 28%),radial-gradient(circle at 18% 78%,rgba(98,168,255,.12),transparent 30%),#0e1824;border:1px solid #2c3e52;border-radius:14px;box-shadow:0 22px 60px rgba(0,0,0,.28)}}
+      .galaxy-legend{{display:flex;gap:20px;flex-wrap:wrap;padding:5px 8px 12px;color:#a9c9e8;font-size:.82rem;font-weight:800}}.galaxy-legend span{{display:flex;align-items:center;gap:7px}}.galaxy-legend i{{display:inline-block;width:18px;height:18px;border-radius:50%}}.legend-size{{background:#62a8ff;box-shadow:0 0 0 4px rgba(98,168,255,.16)}}.legend-colour{{background:linear-gradient(135deg,#d54f61,#e8c55e,#48c98b)}}.legend-ring{{border:3px solid #69d9d0}}
+      .galaxy-stage{{position:relative;max-width:1180px;margin:auto}}.galaxy-svg{{display:block;width:100%;height:auto;min-height:480px}}.galaxy-bg{{fill:#0b1420;stroke:#30445a;stroke-width:1.4}}.galaxy-quadrant{{opacity:.23}}.galaxy-q1{{fill:#174f46}}.galaxy-q2{{fill:#173b59}}.galaxy-q3{{fill:#332b4d}}.galaxy-q4{{fill:#55401d}}.galaxy-grid line{{stroke:#7390ac;stroke-opacity:.11;stroke-width:1}}.galaxy-quadrant-label{{fill:#7e9bb8;opacity:.48;font-size:13px;font-weight:900;letter-spacing:2px}}.galaxy-x-axis{{stroke:url(#galaxy-axis-gradient);stroke-width:4;stroke-linecap:round}}.galaxy-axis-label{{fill:#cce3f7;font-size:14px;font-weight:900;letter-spacing:1.6px}}.galaxy-tether{{stroke:#9bc4e6;stroke-opacity:.2;stroke-dasharray:3 4}}.galaxy-objective-ring{{fill:none;stroke:#69d9d0;stroke-opacity:.78}}.galaxy-player-core{{stroke:#eaf6ff;stroke-width:1.2;filter:url(#galaxy-glow);transition:transform .2s ease,filter .2s ease;transform-box:fill-box;transform-origin:center}}.galaxy-player{{cursor:pointer;outline:none}}.galaxy-player:hover .galaxy-player-core,.galaxy-player:focus .galaxy-player-core{{transform:scale(1.14);filter:url(#galaxy-glow) brightness(1.18)}}.galaxy-initials{{fill:#07111b;font-weight:1000;font-size:11px;text-anchor:middle;pointer-events:none}}.galaxy-name{{fill:#eaf6ff;font-size:11px;font-weight:850;text-anchor:middle;paint-order:stroke;stroke:#0b1420;stroke-width:4px;stroke-linejoin:round;pointer-events:none}}.galaxy-tooltip{{position:absolute;z-index:5;display:grid;gap:3px;min-width:245px;max-width:320px;padding:12px 14px;background:rgba(8,16,26,.96);border:1px solid #4f6f8f;border-radius:10px;box-shadow:0 16px 36px rgba(0,0,0,.42);pointer-events:none;opacity:0;transform:translateY(5px);transition:opacity .15s ease,transform .15s ease}}.galaxy-tooltip.visible{{opacity:1;transform:none}}.galaxy-tooltip strong{{color:#fff;font-size:1rem}}.galaxy-tooltip span{{color:#67dca5;font-weight:850}}.galaxy-tooltip small{{color:#b6d0e8;line-height:1.4}}@media(max-width:720px){{.galaxy-panel{{padding:8px}}.galaxy-svg{{min-width:850px}}.galaxy-stage{{overflow-x:auto}}.galaxy-legend{{gap:10px}}}}
+    </style>
+    """
 
 
 def experimental_early_game_chart() -> str:
