@@ -1569,6 +1569,20 @@ function show(id,write=true){{const p=byId[id]||players[0];if(!p)return;select.v
 select.addEventListener('change',()=>show(select.value));document.getElementById('copy-button').addEventListener('click',async e=>{{await navigator.clipboard.writeText(location.href);e.target.textContent='Copied!';setTimeout(()=>e.target.textContent='Copy link',1400)}});document.getElementById('share-button').addEventListener('click',async()=>{{const p=byId[select.value];if(navigator.share)await navigator.share({{title:document.title,text:p.summary,url:location.href}});else document.getElementById('copy-button').click()}});show(new URLSearchParams(location.search).get('player'),false);</script></body></html>"""
 
 
+def showcase_kill_participation() -> dict[str, tuple[float, int]]:
+    """Return average recorded kill participation for every showcase player."""
+    values: dict[str, list[float]] = defaultdict(list)
+    for record in experimental_player_records():
+        value = record["challenges"].get("killParticipation")
+        if value is not None:
+            player_id = re.sub(r"[^a-z0-9]+", "-", str(record["name"]).casefold()).strip("-")
+            values[player_id].append(float(value))
+    return {
+        player_id: (sum(rows) / len(rows), len(rows))
+        for player_id, rows in values.items() if rows
+    }
+
+
 def enhance_showcases(showcase_html: str) -> str:
     """Give Showcases a stronger visual identity and add a player-aware share action."""
     showcase_html = showcase_html.replace("LoL Player Showcases", "League Flex Showcases")
@@ -1589,6 +1603,18 @@ def enhance_showcases(showcase_html: str) -> str:
         r'<article class="showcase-stat">\s*<span>(?:MVP Score|Role-adjusted MVP)</span>.*?</article>',
         '', showcase_html, flags=re.DOTALL | re.IGNORECASE,
     )
+    for player_id, (average, games) in showcase_kill_participation().items():
+        card = (
+            '<article class="showcase-stat"><span>Kill Participation</span>'
+            f'<div class="showcase-stat-row"><strong>{100 * average:.1f}%</strong>'
+            f'<div class="showcase-stat-ring" style="--value: {100 * average:.1f}%"></div></div>'
+            f'<small>Average across {games} recorded games</small></article>'
+        )
+        showcase_html = re.sub(
+            rf'(<section class="player-showcase[^>]*data-showcase="{re.escape(player_id)}".*?)(<article class="showcase-feature">)',
+            lambda match, card=card: match.group(1) + card + match.group(2),
+            showcase_html, count=1, flags=re.DOTALL,
+        )
     showcase_html = re.sub(
         r'\s*renderCompareStat\("(?:MVP Score|Role-adjusted MVP)".*?\),',
         '', showcase_html,
@@ -1618,7 +1644,11 @@ body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transpa
   const percentile=(value,key)=>Math.max(1,Math.round(100*values.filter(row=>row[key]<=value).length/values.length));
   values.forEach(row=>{const title=row.panel.querySelector('.showcase-title');if(!title||title.querySelector('.showcase-dna'))return;const traits=[...row.panel.querySelectorAll('.showcase-fingerprint-metric')].map(item=>({name:item.querySelector('span')?.textContent||'',value:number(item.querySelector('b')?.textContent)})).sort((a,b)=>b.value-a.value);const champ=row.panel.querySelector('.showcase-feature strong')?.textContent?.trim()||'Unknown',kdaPct=percentile(row.kda,'kda');title.insertAdjacentHTML('beforeend',`<div class="showcase-dna"><span class="showcase-dna-chip gold"><b>${row.games}</b> Flex games</span><span class="showcase-dna-chip"><b>Top ${101-kdaPct}%</b> KDA</span><span class="showcase-dna-chip"><b>${traits[0]?.name||'Flex'}</b> identity</span><span class="showcase-dna-chip"><b>${champ}</b> signature</span></div>`)});
   const rail=document.createElement('div');rail.className='showcase-roster-rail';rail.innerHTML=panels.map(panel=>`<button class="showcase-roster-pill" data-player="${panel.dataset.showcase}">${panel.querySelector('.showcase-title h2')?.textContent||panel.dataset.showcase}</button>`).join('');document.querySelector('.showcase-toolbar')?.insertAdjacentElement('afterend',rail);
-  const activate=id=>{select.value=id;select.dispatchEvent(new Event('change'));rail.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.player===id));rail.querySelector(`[data-player="${id}"]`)?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'})};
+  const poolCards=[...document.querySelectorAll('[data-experimental-pool-id]')],poolPicker=document.getElementById('experimental-pool-picker'),poolSearch=document.querySelector('[data-experimental-pool-search]'),poolCount=document.querySelector('[data-experimental-pool-count]');
+  const poolPlayer=card=>(card.dataset.cardText||'').trim().split(/\\s+/)[0].toLowerCase();
+  const showPool=id=>{const target=poolCards.find(card=>poolPlayer(card)===id)||poolCards[0];poolCards.forEach(card=>card.classList.toggle('active',card===target));if(poolPicker)poolPicker.value=target?.dataset.experimentalPoolId||''};
+  if(poolPicker&&poolCards.length){poolPicker.innerHTML=poolCards.map(card=>`<option value="${card.dataset.experimentalPoolId}">${card.dataset.experimentalPoolLabel}</option>`).join('');poolPicker.addEventListener('change',()=>{const card=poolCards.find(row=>row.dataset.experimentalPoolId===poolPicker.value);if(card)activate(poolPlayer(card))});document.querySelector('[data-experimental-pool-prev]')?.addEventListener('click',()=>step(-1));document.querySelector('[data-experimental-pool-next]')?.addEventListener('click',()=>step(1));poolSearch?.addEventListener('input',()=>{const query=poolSearch.value.trim().toLowerCase();poolCards.forEach(card=>card.hidden=Boolean(query)&&!(card.dataset.cardText||'').toLowerCase().includes(query));const visible=poolCards.filter(card=>!card.hidden);if(poolCount)poolCount.textContent=`${visible.length} players`;if(visible.length&&!visible.some(card=>card.classList.contains('active')))showPool(poolPlayer(visible[0]))});if(poolCount)poolCount.textContent=`${poolCards.length} players`}
+  const activate=id=>{select.value=id;select.dispatchEvent(new Event('change'));showPool(id);rail.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.player===id));rail.querySelector(`[data-player="${id}"]`)?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'})};
   rail.addEventListener('click',e=>{const b=e.target.closest('[data-player]');if(b)activate(b.dataset.player)});const step=d=>{const i=Math.max(0,panels.findIndex(p=>p.classList.contains('active')));activate(panels[(i+d+panels.length)%panels.length].dataset.showcase)};document.querySelector('[data-showcase-prev]')?.addEventListener('click',()=>step(-1));document.querySelector('[data-showcase-next]')?.addEventListener('click',()=>step(1));
   document.querySelector('[data-showcase-random]')?.addEventListener('click',e=>{const choices=panels.filter(p=>!p.classList.contains('active')),pick=choices[Math.floor(Math.random()*choices.length)]||panels[0];activate(pick.dataset.showcase);for(let i=0;i<24;i++){const spark=document.createElement('i');spark.className='spotlight-spark';spark.style.left=e.clientX+'px';spark.style.top=e.clientY+'px';spark.style.setProperty('--dx',(Math.random()*240-120)+'px');spark.style.setProperty('--dy',(Math.random()*220-80)+'px');spark.style.background=['#59e0a8','#67aefc','#ffd872','#f47ea3'][i%4];document.body.appendChild(spark);setTimeout(()=>spark.remove(),950)}});document.addEventListener('keydown',e=>{if(e.target.matches('input,select,textarea'))return;if(e.key==='ArrowLeft')step(-1);if(e.key==='ArrowRight')step(1)});activate(select.value||panels[0].dataset.showcase);
 })();
@@ -1992,7 +2022,27 @@ def main() -> None:
                 + experimental[ownership_end + len("</section>"):]
             )
     experimental = order_custom_meta_by_tier(experimental)
+    pool_section = ""
+    pool_start = experimental.find('<section id="experimental-player-pools"')
+    if pool_start >= 0:
+        pool_end = experimental.find('<section id="', pool_start + 1)
+        if pool_end < 0:
+            pool_end = experimental.find("</main>", pool_start)
+        if pool_end >= 0:
+            pool_section = experimental[pool_start:pool_end]
+            experimental = experimental[:pool_start] + experimental[pool_end:]
+            pool_section = pool_section.replace(
+                "A treemap distribution experiment for each player's champion pool.",
+                "Every champion played by the selected player, sized by share of their Flex games.",
+            )
     experimental_path.write_text(experimental, encoding="utf-8")
+    if pool_section:
+        showcase_path = OUTPUT_DIRECTORY / "index_showcases.html"
+        showcase_source = showcase_path.read_text(encoding="utf-8")
+        showcase_source = showcase_source.replace(
+            "</main>", pool_section + "</main>", 1
+        )
+        showcase_path.write_text(showcase_source, encoding="utf-8")
     for page_path in OUTPUT_DIRECTORY.glob("*.html"):
         page = page_path.read_text(encoding="utf-8")
         page = re.sub(r'\s*<div class="header-actions"[^>]*>.*?</div>', "", page, count=1, flags=re.DOTALL)
