@@ -1566,7 +1566,8 @@ def build_showcase_share_page(showcase_html: str) -> str:
                 for top_name, top_games in highlights.get("champions", [])
             ],
             "best_label": highlights.get("best_label", "-"),
-            "best_value": round(float(highlights.get("best_value", 0)), 1),
+            "best_value": highlights.get("best_value", "-"),
+            "best_category": highlights.get("best_category", "-"),
         })
     data = json.dumps(players, ensure_ascii=False).replace("</", "<\\/")
     options = "".join(f'<option value="{escape(row["id"])}">{escape(row["name"])}</option>' for row in players)
@@ -1579,12 +1580,12 @@ def build_showcase_share_page(showcase_html: str) -> str:
 .controls{{max-width:860px;margin:0 auto 18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}} select,button,a{{border:1px solid var(--line);border-radius:9px;background:#111b27;color:var(--text);padding:10px 14px;font-weight:750;text-decoration:none;cursor:pointer}} button.primary{{background:linear-gradient(135deg,#187f61,#276fb1);border-color:#54e0a4}} .card{{position:relative;overflow:hidden;max-width:860px;min-height:500px;margin:auto;padding:42px;border:1px solid #3a536a;border-radius:26px;background:linear-gradient(145deg,rgba(18,31,45,.97),rgba(8,15,24,.98));box-shadow:0 30px 90px #0009}}
 .card:before{{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 45%,rgba(84,224,164,.08));pointer-events:none}} .champ-art{{position:absolute;right:-45px;bottom:-55px;width:390px;height:390px;object-fit:cover;opacity:.18;filter:saturate(1.35);border-radius:50%}} .eyebrow{{color:var(--mint);font-size:.78rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase}} h1{{font-size:clamp(3rem,8vw,6.8rem);line-height:.86;margin:17px 0 20px;letter-spacing:-.06em}} .summary{{position:relative;max-width:620px;color:#c5d9ec;font-size:1.08rem;line-height:1.6}} .stats{{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:32px 0}} .stat,.signature{{padding:16px;background:#101d2bdb;border:1px solid var(--line);border-radius:13px}} .stat span,.signature span{{display:block;color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.08em}} .stat b{{display:block;font-size:1.6rem;margin-top:7px}} .signature{{position:relative;display:grid;grid-template-columns:62px minmax(0,1fr) auto;align-items:center;gap:14px;max-width:680px;border-color:#3d806b}} .signature>img{{width:62px;height:62px;border-radius:12px}} .signature strong{{display:block;font-size:1.35rem;margin:4px 0}} .signature small{{color:#b9cee2}} .share-top-picks{{display:flex;gap:6px}}.share-top-pick{{position:relative}}.share-top-pick img{{width:38px;height:38px;border-radius:7px;border:1px solid #365069}}.share-top-pick small{{position:absolute;right:-3px;bottom:-4px;padding:1px 4px;border-radius:5px;background:#071019;color:#fff;font-size:.6rem}}.share-best{{padding-left:12px;border-left:1px solid #315846}}.share-best b{{color:var(--mint)}}.brand{{position:absolute;right:30px;top:28px;color:#91abc3;font-size:.72rem;font-weight:900;letter-spacing:.12em}}
 .hint{{max-width:860px;margin:14px auto;color:#91abc3;font-size:.84rem;text-align:center}} @media(max-width:650px){{body{{padding:12px}}.card{{padding:28px 20px;min-height:560px}}.stats{{grid-template-columns:repeat(2,1fr)}}.champ-art{{width:270px;height:270px}}}} @media print{{body{{padding:0;background:#070c12;-webkit-print-color-adjust:exact;print-color-adjust:exact}}.controls,.hint{{display:none}}.card{{max-width:none;width:100%;height:100vh;border:0;border-radius:0;box-shadow:none}}}}
-</style><style>.signature{{grid-template-columns:62px minmax(0,1fr) minmax(150px,auto) minmax(150px,auto);max-width:760px}}@media(max-width:650px){{.signature{{grid-template-columns:62px minmax(0,1fr)}}.signature>div:nth-of-type(n+2){{grid-column:1/-1}}.share-best{{padding:10px 0 0;border-left:0;border-top:1px solid #315846}}}}</style></head><body>
+</style><style>.signature{{grid-template-columns:62px minmax(0,1fr) minmax(150px,auto) minmax(180px,auto);max-width:790px}}.share-best{{padding:9px 12px}}.share-best b{{display:block;margin:5px 0;color:var(--mint);line-height:1.2}}.share-best small{{display:block;line-height:1.35}}@media(max-width:650px){{.signature{{grid-template-columns:62px minmax(0,1fr)}}.signature>div:nth-of-type(n+2){{grid-column:1/-1}}.share-best{{padding:10px 0 0;border-left:0;border-top:1px solid #315846}}}}</style></head><body>
 <div class="controls"><a href="index_showcases.html">← Full showcases</a><select id="player-select">{options}</select><button class="primary" id="share-button">Share card</button><button id="copy-button">Copy link</button><button onclick="window.print()">Save as PDF</button></div>
-<main class="card" id="card"><div class="brand">LEAGUE FLEX</div><img class="champ-art" id="champ-art" alt=""><div class="eyebrow">PLAYER SHOWCASE</div><h1 id="name"></h1><p class="summary" id="summary"></p><div class="stats"><div class="stat"><span>Games</span><b id="games"></b></div><div class="stat"><span>Win rate</span><b id="winrate"></b></div><div class="stat"><span>KDA</span><b id="kda"></b></div></div><div class="signature"><img id="champ-icon" alt=""><div><span>Most played champion</span><strong id="champion"></strong><small id="champion-detail"></small></div><div><span>Top 3 champions</span><div class="share-top-picks" id="share-top-picks"></div></div><div class="share-best"><span>Strongest impact stat</span><b id="share-best-label"></b><small id="share-best-value"></small></div></div></main>
+<main class="card" id="card"><div class="brand">LEAGUE FLEX</div><img class="champ-art" id="champ-art" alt=""><div class="eyebrow">PLAYER SHOWCASE</div><h1 id="name"></h1><p class="summary" id="summary"></p><div class="stats"><div class="stat"><span>Games</span><b id="games"></b></div><div class="stat"><span>Win rate</span><b id="winrate"></b></div><div class="stat"><span>KDA</span><b id="kda"></b></div></div><div class="signature"><img id="champ-icon" alt=""><div><span>Most played champion</span><strong id="champion"></strong><small id="champion-detail"></small></div><div><span>Top 3 champions</span><div class="share-top-picks" id="share-top-picks"></div></div><div class="share-best"><span id="share-best-category"></span><b id="share-best-label"></b><small id="share-best-value"></small></div></div></main>
 <p class="hint">This page has its own player-specific URL. Share it directly or use “Save as PDF” for a compact keepsake.</p>
 <script>const players={data};const select=document.getElementById('player-select');const byId=Object.fromEntries(players.map(p=>[p.id,p]));
-function show(id,write=true){{const p=byId[id]||players[0];if(!p)return;select.value=p.id;for(const key of ['name','summary','games','winrate','kda','champion'])document.getElementById(key).textContent=p[key];document.getElementById('champion-detail').textContent=p.champion_detail;document.getElementById('share-top-picks').innerHTML=p.top_champions.map(row=>`<span class="share-top-pick" title="${{row.name}}: ${{row.games}} games"><img src="${{row.icon}}" alt="${{row.name}}"><small>${{row.games}}g</small></span>`).join('');document.getElementById('share-best-label').textContent=p.best_label;document.getElementById('share-best-value').textContent=p.best_value.toFixed(1)+'/100 role-relative';for(const id of ['champ-art','champ-icon'])document.getElementById(id).src=p.icon;if(write)history.replaceState(null,'','?player='+encodeURIComponent(p.id));document.title=p.name+' — League Flex Player Card'}}
+function show(id,write=true){{const p=byId[id]||players[0];if(!p)return;select.value=p.id;for(const key of ['name','summary','games','winrate','kda','champion'])document.getElementById(key).textContent=p[key];document.getElementById('champion-detail').textContent=p.champion_detail;document.getElementById('share-top-picks').innerHTML=p.top_champions.map(row=>`<span class="share-top-pick" title="${{row.name}}: ${{row.games}} games"><img src="${{row.icon}}" alt="${{row.name}}"><small>${{row.games}}g</small></span>`).join('');document.getElementById('share-best-category').textContent='Best '+p.best_category+' stat';document.getElementById('share-best-label').textContent=p.best_label;document.getElementById('share-best-value').textContent=p.best_value;for(const id of ['champ-art','champ-icon'])document.getElementById(id).src=p.icon;if(write)history.replaceState(null,'','?player='+encodeURIComponent(p.id));document.title=p.name+' — League Flex Player Card'}}
 select.addEventListener('change',()=>show(select.value));document.getElementById('copy-button').addEventListener('click',async e=>{{await navigator.clipboard.writeText(location.href);e.target.textContent='Copied!';setTimeout(()=>e.target.textContent='Copy link',1400)}});document.getElementById('share-button').addEventListener('click',async()=>{{const p=byId[select.value];if(navigator.share)await navigator.share({{title:document.title,text:p.summary,url:location.href}});else document.getElementById('copy-button').click()}});show(new URLSearchParams(location.search).get('player'),false);</script></body></html>"""
 
 
@@ -1603,7 +1604,7 @@ def showcase_kill_participation() -> dict[str, tuple[float, int]]:
 
 
 def showcase_player_highlights() -> dict[str, dict[str, object]]:
-    """Return each player's top three picks and strongest role-relative dimension."""
+    """Return top picks and the best real metric inside the strongest dimension."""
     champion_rows: dict[str, Counter] = defaultdict(Counter)
     for match in tracked_match_log():
         for participant in match["participant_stats"]:
@@ -1613,16 +1614,67 @@ def showcase_player_highlights() -> dict[str, dict[str, object]]:
         "teamplay_score": "Teamplay", "vision_impact_score": "Vision",
         "utility_score": "Utility", "objective_score": "Objectives",
     }
+    granular_candidates = {
+        "combat_score": (("damage_min", "Damage per Minute", "number"), ("damage_share", "Team Damage Share", "percent")),
+        "economy_score": (("gold_min", "Gold per Minute", "number"), ("gold_15", "Gold Difference at 15", "signed"), ("xp_15", "XP Difference at 15", "signed")),
+        "teamplay_score": (("kp", "Kill Participation", "percent"), ("takedowns", "Takedowns per Game", "decimal")),
+        "vision_impact_score": (("vision", "Vision Score per Game", "decimal"), ("wards_placed", "Wards Placed per Game", "decimal"), ("wards_killed", "Wards Cleared per Game", "decimal"), ("control_wards", "Control Wards per Game", "decimal")),
+        "utility_score": (("heal_shield", "Heal & Shield per Game", "number"), ("saves", "Allies Saved per Game", "decimal"), ("cc", "Enemies Immobilised per Game", "decimal")),
+        "objective_score": (("objective_damage", "Objective Damage per Game", "number"), ("objective_events", "Epic Objective Involvement", "decimal"), ("conversions", "Kill-to-Objective Conversions", "decimal")),
+    }
+    granular_rows: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for record in experimental_player_records():
+        name = str(record["name"])
+        participant, challenges = record["participant"], record["challenges"]
+        minutes = max(1.0, float(record["minutes"]))
+        values = {
+            "damage_min": float(challenges.get("damagePerMinute", 0) or 0),
+            "damage_share": float(challenges.get("teamDamagePercentage", 0) or 0),
+            "gold_min": float(participant.get("goldEarned", 0) or 0) / minutes,
+            "gold_15": float(record["diff"][15]["gold"]), "xp_15": float(record["diff"][15]["xp"]),
+            "kp": float(challenges.get("killParticipation", 0) or 0),
+            "takedowns": float(record["timeline_takedowns"]),
+            "vision": float(participant.get("visionScore", 0) or 0),
+            "wards_placed": float(participant.get("wardsPlaced", 0) or 0),
+            "wards_killed": float(participant.get("wardsKilled", 0) or 0),
+            "control_wards": float(participant.get("visionWardsBoughtInGame", 0) or 0),
+            "heal_shield": float(challenges.get("effectiveHealAndShielding", 0) or 0),
+            "saves": float(challenges.get("saveAllyFromDeath", 0) or 0),
+            "cc": float(challenges.get("enemyChampionImmobilizations", 0) or 0),
+            "objective_damage": float(participant.get("damageDealtToObjectives", 0) or 0),
+            "objective_events": float(sum(record["objectives"].values())),
+            "conversions": float(record["converted_takedowns"]),
+        }
+        for key, value in values.items():
+            granular_rows[name][key].append(value)
+    granular_averages = {
+        name: {key: sum(values) / len(values) for key, values in metrics.items() if values}
+        for name, metrics in granular_rows.items()
+    }
+    def metric_percentile(name: str, key: str) -> float:
+        value = granular_averages.get(name, {}).get(key, 0)
+        population = sorted(metrics.get(key, 0) for metrics in granular_averages.values())
+        return (bisect_left(population, value) + bisect_right(population, value)) / (2 * max(1, len(population)))
+    def format_metric(value: float, kind: str) -> str:
+        if kind == "percent": return f"{100 * value:.1f}% average"
+        if kind == "signed": return f"{value:+,.0f} average"
+        if kind == "decimal": return f"{value:.1f} per game"
+        return f"{value:,.0f} average"
     scores = role_normalized_player_scores()
     output = {}
     for name, champions in champion_rows.items():
         player_id = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
         player_scores = scores.get(name, {})
         strongest_key = max(score_labels, key=lambda key: float(player_scores.get(key, 0)))
+        granular_key, granular_label, granular_kind = max(
+            granular_candidates[strongest_key], key=lambda candidate: metric_percentile(name, candidate[0])
+        )
+        granular_value = granular_averages.get(name, {}).get(granular_key, 0)
         output[player_id] = {
             "champions": champions.most_common(3),
-            "best_label": score_labels[strongest_key],
-            "best_value": 100 * float(player_scores.get(strongest_key, 0)),
+            "best_category": score_labels[strongest_key],
+            "best_label": granular_label,
+            "best_value": format_metric(granular_value, granular_kind),
         }
     return output
 
@@ -1632,7 +1684,7 @@ def enhance_showcases(showcase_html: str) -> str:
     showcase_html = showcase_html.replace("LoL Player Showcases", "League Flex Showcases")
     showcase_html = showcase_html.replace(
         "</head>",
-        '<style id="showcase-highlight-overrides">.showcase-top-pick{grid-template-columns:30px auto!important;flex:0 0 auto!important}.showcase-top-pick b{display:none}</style></head>',
+        '<style id="showcase-highlight-overrides">.showcase-top-pick{grid-template-columns:30px auto!important;flex:0 0 auto!important}.showcase-top-pick b{display:none}.showcase-best-stat{padding:12px 14px!important;gap:4px}</style></head>',
         1,
     )
     showcase_html = showcase_html.replace(
@@ -1674,8 +1726,8 @@ def enhance_showcases(showcase_html: str) -> str:
         extra = (
             '<div class="showcase-extra-highlights">'
             f'<div><span>Top 3 champions</span><div class="showcase-top-picks">{champion_chips}</div></div>'
-            f'<div class="showcase-best-stat"><span>Strongest impact stat</span><b>{escape(str(highlight["best_label"]))}</b>'
-            f'<small>{float(highlight["best_value"]):.1f}/100 role-relative</small></div></div>'
+            f'<div class="showcase-best-stat"><span>Best {escape(str(highlight["best_category"]))} stat</span><b>{escape(str(highlight["best_label"]))}</b>'
+            f'<small>{escape(str(highlight["best_value"]))}</small></div></div>'
         )
         showcase_html = re.sub(
             rf'(<section class="player-showcase[^>]*data-showcase="{re.escape(player_id)}".*?<article class="showcase-feature">.*?<small>.*?</small>)(\s*</div>\s*</article>)',
@@ -1689,7 +1741,7 @@ def enhance_showcases(showcase_html: str) -> str:
     fun_controls = ('<div class="showcase-fun-controls"><button type="button" data-showcase-prev>←</button>'
                     '<button type="button" class="random-spotlight" data-showcase-random>✦ Random spotlight</button>'
                     '<button type="button" data-showcase-next>→</button></div>'
-                    '<a class="showcase-share-button" data-showcase-share href="showcase_share.html?v=2">Share player card ↗</a>')
+                    '<a class="showcase-share-button" data-showcase-share href="showcase_share.html?v=3">Share player card ↗</a>')
     showcase_html = showcase_html.replace('<div class="showcase-count">', fun_controls + '<div class="showcase-count">', 1)
     showcase_html = showcase_html.replace(
         "</head>",
@@ -1700,7 +1752,7 @@ body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transpa
     )
     showcase_html = showcase_html.replace(
         "if (showcaseSelect) showcaseSelect.value = target.dataset.showcase;",
-        "if (showcaseSelect) showcaseSelect.value = target.dataset.showcase; const share = document.querySelector('[data-showcase-share]'); if (share) share.href = `showcase_share.html?v=2&player=${encodeURIComponent(target.dataset.showcase)}`;",
+        "if (showcaseSelect) showcaseSelect.value = target.dataset.showcase; const share = document.querySelector('[data-showcase-share]'); if (share) share.href = `showcase_share.html?v=3&player=${encodeURIComponent(target.dataset.showcase)}`;",
         1,
     )
     showcase_html = showcase_html.replace("</body>", """<script id="showcase-fun-script">
