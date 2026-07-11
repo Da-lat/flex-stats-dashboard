@@ -848,7 +848,7 @@
     .award-theme-violet b {
       color: var(--violet);
     }
-    .mvp-team-grid {
+    .legacy_metric-team-grid {
       display: grid;
       grid-template-columns: 1fr;
       gap: 16px;
@@ -2007,7 +2007,7 @@
       font-variant-numeric: tabular-nums;
     }
     td.name-cell,
-    td.mvp-name-cell {
+    td.legacy_metric-name-cell {
       min-width: 12ch;
       white-space: nowrap;
       overflow-wrap: normal;
@@ -2288,7 +2288,7 @@
     tbody tr:hover td.table-heat-cell {
       filter: brightness(1.06);
     }
-    td.mvp-name-cell {
+    td.legacy_metric-name-cell {
       background: linear-gradient(90deg, rgba(240, 201, 106, 0.10), rgba(98, 168, 255, 0.04));
     }
     .heatmap-table .empty-cell {
@@ -2304,7 +2304,7 @@
     @media (max-width: 1040px) {
       .metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .chart-grid, .svg-grid, .award-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .mvp-team-grid { grid-template-columns: 1fr; }
+      .legacy_metric-team-grid { grid-template-columns: 1fr; }
       .player-pool-browser { grid-template-columns: auto minmax(160px, 1fr) auto; }
       .player-pool-browser .card-search, .player-pool-browser .pool-count { grid-column: 1 / -1; }
       .topline { flex-direction: column; }
@@ -2987,7 +2987,6 @@
     <a href="index.html#champions">Champions</a>
     <a href="index.html#combos">Combos</a>
     <a href="index.html#matches">Matches</a>
-    <a href="index_teams.html#teams">Teams</a>
     <a href="index_showcases.html">Showcases</a>
     <a href="index_experimental.html#custom-meta">Experimental</a>
   </nav>
@@ -3300,17 +3299,17 @@
       <span>Heating Up</span>
       <strong>Brands</strong>
       <b>75.8 form</b>
-      <small>+24 vs season MVP baseline.</small>
+      <small>+26 vs season baseline.</small>
     </article>
     
     <article class="form-highlight-card status-cooling-down">
       <span>Biggest Slump</span>
-      <strong>Jay</strong>
-      <b>33.3 form</b>
-      <small>-22 vs season MVP baseline.</small>
+      <strong>Iestyn</strong>
+      <b>31.7 form</b>
+      <small>-18 vs season baseline.</small>
     </article>
     
-    <article class="form-highlight-card status-cooling-down">
+    <article class="form-highlight-card status-stable">
       <span>Current Streak</span>
       <strong>Grant</strong>
       <b>46.8 form</b>

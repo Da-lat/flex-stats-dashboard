@@ -54,7 +54,6 @@ SHARED_NAV_HTML = """<nav class="shared-dashboard-nav">
     <a href="index.html#champions">Champions</a>
     <a href="index.html#combos">Combos</a>
     <a href="index.html#matches">Matches</a>
-    <a href="index_teams.html#teams">Teams</a>
     <a href="index_showcases.html">Showcases</a>
     <a href="index_experimental.html#custom-meta">Experimental</a>
   </nav>"""
@@ -576,13 +575,6 @@ def role_normalized_player_scores() -> dict[str, dict[str, float]]:
             return .5
         return (bisect_left(ordered, value) + bisect_right(ordered, value)) / (2 * len(ordered))
 
-    dimension_weights = {
-        "TOP":    {"combat_score":.25,"economy_score":.20,"teamplay_score":.15,"vision_impact_score":.05,"utility_score":.10,"objective_score":.20},
-        "JUNGLE": {"combat_score":.15,"economy_score":.12,"teamplay_score":.18,"vision_impact_score":.08,"utility_score":.07,"objective_score":.35},
-        "MID":    {"combat_score":.24,"economy_score":.19,"teamplay_score":.17,"vision_impact_score":.06,"utility_score":.09,"objective_score":.20},
-        "BOT":    {"combat_score":.30,"economy_score":.23,"teamplay_score":.15,"vision_impact_score":.04,"utility_score":.03,"objective_score":.20},
-        "SUPP":   {"combat_score":.07,"economy_score":.03,"teamplay_score":.22,"vision_impact_score":.25,"utility_score":.25,"objective_score":.13},
-    }
     by_player: dict[str, list[dict[str, float]]] = defaultdict(list)
     for game in games:
         role = str(game["role"])
@@ -595,15 +587,10 @@ def role_normalized_player_scores() -> dict[str, dict[str, float]]:
             "utility_score": .45*pct["heal_shield"] + .25*pct["saves"] + .30*pct["cc"],
             "objective_score": .50*pct["objective_damage"] + .30*pct["objective_events"] + .20*pct["conversion"],
         }
-        # Only five percent comes directly from winning; the rest describes how
-        # the player contributed, avoiding a disguised second win-rate table.
-        impact = .05 * float(game["win"]) + sum(
-            dimension_weights[role][metric] * value for metric, value in dimensions.items()
-        )
-        by_player[str(game["name"])].append({**dimensions, "mvp_score": impact})
+        by_player[str(game["name"])].append(dimensions)
 
     output = {}
-    score_keys = ("combat_score", "economy_score", "teamplay_score", "vision_impact_score", "utility_score", "objective_score", "mvp_score")
+    score_keys = ("combat_score", "economy_score", "teamplay_score", "vision_impact_score", "utility_score", "objective_score")
     for name, rows in by_player.items():
         output[name] = {key: sum(row[key] for row in rows) / len(rows) for key in score_keys}
         output[name]["games"] = float(len(rows))
@@ -1541,27 +1528,24 @@ def build_showcase_share_page(showcase_html: str) -> str:
     section_pattern = re.compile(
         r'<section class="player-showcase[^>]*" data-showcase="([^"]+)".*?'
         r'<img class="showcase-watermark" src="([^"]+)".*?'
-        r'<div class="showcase-kicker">(.*?)</div>.*?<h2>(.*?)</h2>.*?'
+        r'<div class="showcase-kicker">.*?</div>.*?<h2>(.*?)</h2>.*?'
         r'<p class="showcase-summary">(.*?)</p>.*?'
         r'<article class="showcase-stat">\s*<span>Games</span>.*?<strong>(.*?)</strong>.*?'
         r'<article class="showcase-stat">\s*<span>Winrate</span>.*?<strong>(.*?)</strong>.*?'
         r'<article class="showcase-stat">\s*<span>KDA</span>.*?<strong>(.*?)</strong>.*?'
-        r'<article class="showcase-stat">\s*<span>(?:MVP Score|Role-adjusted MVP)</span>.*?<strong>(.*?)</strong>.*?'
         r'<article class="showcase-feature">\s*<img[^>]*>\s*<div>.*?<strong>(.*?)</strong>\s*<small>(.*?)</small>',
         re.DOTALL,
     )
     for match in section_pattern.finditer(showcase_html):
-        player_id, icon, kicker, name, summary, games, winrate, kda, mvp, champion, champion_detail = match.groups()
+        player_id, icon, name, summary, games, winrate, kda, champion, champion_detail = match.groups()
         players.append({
             "id": player_id,
             "icon": icon,
-            "rank": re.sub(r"^Player Showcase\s*/\s*", "", re.sub("<.*?>", "", kicker)).strip(),
             "name": re.sub("<.*?>", "", name).strip(),
             "summary": re.sub("<.*?>", "", summary).strip(),
             "games": games.strip(),
             "winrate": winrate.strip(),
             "kda": kda.strip(),
-            "mvp": mvp.strip(),
             "champion": champion.strip(),
             "champion_detail": champion_detail.strip(),
         })
@@ -1574,14 +1558,14 @@ def build_showcase_share_page(showcase_html: str) -> str:
 :root{{--bg:#070c12;--panel:#111b27;--line:#2a3b4f;--text:#f5f8fc;--muted:#9fc4e4;--mint:#54e0a4;--blue:#69aefc}}
 *{{box-sizing:border-box}} body{{margin:0;min-height:100vh;background:radial-gradient(circle at 15% 10%,#143653 0,transparent 32%),radial-gradient(circle at 90% 85%,#163e32 0,transparent 35%),var(--bg);color:var(--text);font-family:Inter,Segoe UI,sans-serif;padding:28px}}
 .controls{{max-width:860px;margin:0 auto 18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}} select,button,a{{border:1px solid var(--line);border-radius:9px;background:#111b27;color:var(--text);padding:10px 14px;font-weight:750;text-decoration:none;cursor:pointer}} button.primary{{background:linear-gradient(135deg,#187f61,#276fb1);border-color:#54e0a4}} .card{{position:relative;overflow:hidden;max-width:860px;min-height:500px;margin:auto;padding:42px;border:1px solid #3a536a;border-radius:26px;background:linear-gradient(145deg,rgba(18,31,45,.97),rgba(8,15,24,.98));box-shadow:0 30px 90px #0009}}
-.card:before{{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 45%,rgba(84,224,164,.08));pointer-events:none}} .champ-art{{position:absolute;right:-45px;bottom:-55px;width:390px;height:390px;object-fit:cover;opacity:.18;filter:saturate(1.35);border-radius:50%}} .eyebrow{{color:var(--mint);font-size:.78rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase}} h1{{font-size:clamp(3rem,8vw,6.8rem);line-height:.86;margin:17px 0 20px;letter-spacing:-.06em}} .summary{{position:relative;max-width:620px;color:#c5d9ec;font-size:1.08rem;line-height:1.6}} .stats{{position:relative;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:32px 0}} .stat,.signature{{padding:16px;background:#101d2bdb;border:1px solid var(--line);border-radius:13px}} .stat span,.signature span{{display:block;color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.08em}} .stat b{{display:block;font-size:1.6rem;margin-top:7px}} .signature{{position:relative;display:flex;align-items:center;gap:14px;max-width:470px;border-color:#3d806b}} .signature img{{width:62px;height:62px;border-radius:12px}} .signature strong{{display:block;font-size:1.35rem;margin:4px 0}} .signature small{{color:#b9cee2}} .brand{{position:absolute;right:30px;top:28px;color:#91abc3;font-size:.72rem;font-weight:900;letter-spacing:.12em}}
+.card:before{{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 45%,rgba(84,224,164,.08));pointer-events:none}} .champ-art{{position:absolute;right:-45px;bottom:-55px;width:390px;height:390px;object-fit:cover;opacity:.18;filter:saturate(1.35);border-radius:50%}} .eyebrow{{color:var(--mint);font-size:.78rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase}} h1{{font-size:clamp(3rem,8vw,6.8rem);line-height:.86;margin:17px 0 20px;letter-spacing:-.06em}} .summary{{position:relative;max-width:620px;color:#c5d9ec;font-size:1.08rem;line-height:1.6}} .stats{{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:32px 0}} .stat,.signature{{padding:16px;background:#101d2bdb;border:1px solid var(--line);border-radius:13px}} .stat span,.signature span{{display:block;color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.08em}} .stat b{{display:block;font-size:1.6rem;margin-top:7px}} .signature{{position:relative;display:flex;align-items:center;gap:14px;max-width:470px;border-color:#3d806b}} .signature img{{width:62px;height:62px;border-radius:12px}} .signature strong{{display:block;font-size:1.35rem;margin:4px 0}} .signature small{{color:#b9cee2}} .brand{{position:absolute;right:30px;top:28px;color:#91abc3;font-size:.72rem;font-weight:900;letter-spacing:.12em}}
 .hint{{max-width:860px;margin:14px auto;color:#91abc3;font-size:.84rem;text-align:center}} @media(max-width:650px){{body{{padding:12px}}.card{{padding:28px 20px;min-height:560px}}.stats{{grid-template-columns:repeat(2,1fr)}}.champ-art{{width:270px;height:270px}}}} @media print{{body{{padding:0;background:#070c12;-webkit-print-color-adjust:exact;print-color-adjust:exact}}.controls,.hint{{display:none}}.card{{max-width:none;width:100%;height:100vh;border:0;border-radius:0;box-shadow:none}}}}
 </style></head><body>
 <div class="controls"><a href="index_showcases.html">← Full showcases</a><select id="player-select">{options}</select><button class="primary" id="share-button">Share card</button><button id="copy-button">Copy link</button><button onclick="window.print()">Save as PDF</button></div>
-<main class="card" id="card"><div class="brand">LEAGUE FLEX</div><img class="champ-art" id="champ-art" alt=""><div class="eyebrow" id="rank"></div><h1 id="name"></h1><p class="summary" id="summary"></p><div class="stats"><div class="stat"><span>Games</span><b id="games"></b></div><div class="stat"><span>Win rate</span><b id="winrate"></b></div><div class="stat"><span>KDA</span><b id="kda"></b></div><div class="stat"><span>Role-adjusted MVP</span><b id="mvp"></b></div></div><div class="signature"><img id="champ-icon" alt=""><div><span>Signature champion</span><strong id="champion"></strong><small id="champion-detail"></small></div></div></main>
+<main class="card" id="card"><div class="brand">LEAGUE FLEX</div><img class="champ-art" id="champ-art" alt=""><div class="eyebrow">PLAYER SHOWCASE</div><h1 id="name"></h1><p class="summary" id="summary"></p><div class="stats"><div class="stat"><span>Games</span><b id="games"></b></div><div class="stat"><span>Win rate</span><b id="winrate"></b></div><div class="stat"><span>KDA</span><b id="kda"></b></div></div><div class="signature"><img id="champ-icon" alt=""><div><span>Signature champion</span><strong id="champion"></strong><small id="champion-detail"></small></div></div></main>
 <p class="hint">This page has its own player-specific URL. Share it directly or use “Save as PDF” for a compact keepsake.</p>
 <script>const players={data};const select=document.getElementById('player-select');const byId=Object.fromEntries(players.map(p=>[p.id,p]));
-function show(id,write=true){{const p=byId[id]||players[0];if(!p)return;select.value=p.id;for(const key of ['rank','name','summary','games','winrate','kda','mvp','champion'])document.getElementById(key).textContent=p[key];document.getElementById('champion-detail').textContent=p.champion_detail;for(const id of ['champ-art','champ-icon'])document.getElementById(id).src=p.icon;if(write)history.replaceState(null,'','?player='+encodeURIComponent(p.id));document.title=p.name+' — League Flex Player Card'}}
+function show(id,write=true){{const p=byId[id]||players[0];if(!p)return;select.value=p.id;for(const key of ['name','summary','games','winrate','kda','champion'])document.getElementById(key).textContent=p[key];document.getElementById('champion-detail').textContent=p.champion_detail;for(const id of ['champ-art','champ-icon'])document.getElementById(id).src=p.icon;if(write)history.replaceState(null,'','?player='+encodeURIComponent(p.id));document.title=p.name+' — League Flex Player Card'}}
 select.addEventListener('change',()=>show(select.value));document.getElementById('copy-button').addEventListener('click',async e=>{{await navigator.clipboard.writeText(location.href);e.target.textContent='Copied!';setTimeout(()=>e.target.textContent='Copy link',1400)}});document.getElementById('share-button').addEventListener('click',async()=>{{const p=byId[select.value];if(navigator.share)await navigator.share({{title:document.title,text:p.summary,url:location.href}});else document.getElementById('copy-button').click()}});show(new URLSearchParams(location.search).get('player'),false);</script></body></html>"""
 
 
@@ -1593,12 +1577,21 @@ def enhance_showcases(showcase_html: str) -> str:
         "Your Flex careers turned into player stories: signature picks, personal records, form arcs, and friendly rivalries.</p><p class=\"showcase-model-note\"><b>New role-relative model:</b> damage/min, gold/min, teamplay, vision, utility and objectives are compared with tracked players in the same role.",
     )
     showcase_html = showcase_html.replace(">Player Fingerprint<", ">Role Impact Profile<")
-    showcase_html = showcase_html.replace(">MVP Score<", ">Role-adjusted MVP<")
-    showcase_html = showcase_html.replace(
-        'renderCompareStat("MVP Score",', 'renderCompareStat("Role-adjusted MVP",'
-    ).replace(
-        '"Overall board rating from the current MVP formula."',
-        '"Role-relative rating across combat, economy, teamplay, vision, utility, objectives, survival and results."',
+    showcase_html = re.sub(
+        r'<div class="showcase-kicker">.*?</div>',
+        '<div class="showcase-kicker">Player Showcase</div>',
+        showcase_html,
+    )
+    showcase_html = re.sub(
+        r', ranking #\d+ on MVP score\.', '.', showcase_html, flags=re.IGNORECASE
+    )
+    showcase_html = re.sub(
+        r'<article class="showcase-stat">\s*<span>(?:MVP Score|Role-adjusted MVP)</span>.*?</article>',
+        '', showcase_html, flags=re.DOTALL | re.IGNORECASE,
+    )
+    showcase_html = re.sub(
+        r'\s*renderCompareStat\("(?:MVP Score|Role-adjusted MVP)".*?\),',
+        '', showcase_html,
     )
     fun_controls = ('<div class="showcase-fun-controls"><button type="button" data-showcase-prev>←</button>'
                     '<button type="button" class="random-spotlight" data-showcase-random>✦ Random spotlight</button>'
@@ -1621,15 +1614,24 @@ body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transpa
 (() => {
   const panels=[...document.querySelectorAll('[data-showcase]')], select=document.querySelector('[data-showcase-select]'); if(!panels.length||!select)return;
   const number=v=>Number(String(v||'').replace(/[^0-9.-]/g,''))||0;
-  const values=panels.map(panel=>{const s=[...panel.querySelectorAll('.showcase-stat strong')];return{panel,games:number(s[0]?.textContent),wr:number(s[1]?.textContent),kda:number(s[2]?.textContent),mvp:number(s[3]?.textContent)}});
+  const values=panels.map(panel=>{const s=[...panel.querySelectorAll('.showcase-stat strong')];return{panel,games:number(s[0]?.textContent),wr:number(s[1]?.textContent),kda:number(s[2]?.textContent)}});
   const percentile=(value,key)=>Math.max(1,Math.round(100*values.filter(row=>row[key]<=value).length/values.length));
-  values.forEach(row=>{const title=row.panel.querySelector('.showcase-title');if(!title||title.querySelector('.showcase-dna'))return;const traits=[...row.panel.querySelectorAll('.showcase-fingerprint-metric')].map(item=>({name:item.querySelector('span')?.textContent||'',value:number(item.querySelector('b')?.textContent)})).sort((a,b)=>b.value-a.value);const champ=row.panel.querySelector('.showcase-feature strong')?.textContent?.trim()||'Unknown',mvpPct=percentile(row.mvp,'mvp'),kdaPct=percentile(row.kda,'kda'),tier=mvpPct>=90?'Elite':mvpPct>=70?'Standout':mvpPct>=45?'Core':'Wildcard';title.insertAdjacentHTML('beforeend',`<div class="showcase-dna"><span class="showcase-dna-chip gold"><b>${tier}</b> Flex profile</span><span class="showcase-dna-chip"><b>Top ${101-mvpPct}%</b> MVP</span><span class="showcase-dna-chip"><b>Top ${101-kdaPct}%</b> KDA</span><span class="showcase-dna-chip"><b>${traits[0]?.name||'Flex'}</b> identity</span><span class="showcase-dna-chip"><b>${champ}</b> signature</span></div>`)});
+  values.forEach(row=>{const title=row.panel.querySelector('.showcase-title');if(!title||title.querySelector('.showcase-dna'))return;const traits=[...row.panel.querySelectorAll('.showcase-fingerprint-metric')].map(item=>({name:item.querySelector('span')?.textContent||'',value:number(item.querySelector('b')?.textContent)})).sort((a,b)=>b.value-a.value);const champ=row.panel.querySelector('.showcase-feature strong')?.textContent?.trim()||'Unknown',kdaPct=percentile(row.kda,'kda');title.insertAdjacentHTML('beforeend',`<div class="showcase-dna"><span class="showcase-dna-chip gold"><b>${row.games}</b> Flex games</span><span class="showcase-dna-chip"><b>Top ${101-kdaPct}%</b> KDA</span><span class="showcase-dna-chip"><b>${traits[0]?.name||'Flex'}</b> identity</span><span class="showcase-dna-chip"><b>${champ}</b> signature</span></div>`)});
   const rail=document.createElement('div');rail.className='showcase-roster-rail';rail.innerHTML=panels.map(panel=>`<button class="showcase-roster-pill" data-player="${panel.dataset.showcase}">${panel.querySelector('.showcase-title h2')?.textContent||panel.dataset.showcase}</button>`).join('');document.querySelector('.showcase-toolbar')?.insertAdjacentElement('afterend',rail);
   const activate=id=>{select.value=id;select.dispatchEvent(new Event('change'));rail.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.player===id));rail.querySelector(`[data-player="${id}"]`)?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'})};
   rail.addEventListener('click',e=>{const b=e.target.closest('[data-player]');if(b)activate(b.dataset.player)});const step=d=>{const i=Math.max(0,panels.findIndex(p=>p.classList.contains('active')));activate(panels[(i+d+panels.length)%panels.length].dataset.showcase)};document.querySelector('[data-showcase-prev]')?.addEventListener('click',()=>step(-1));document.querySelector('[data-showcase-next]')?.addEventListener('click',()=>step(1));
   document.querySelector('[data-showcase-random]')?.addEventListener('click',e=>{const choices=panels.filter(p=>!p.classList.contains('active')),pick=choices[Math.floor(Math.random()*choices.length)]||panels[0];activate(pick.dataset.showcase);for(let i=0;i<24;i++){const spark=document.createElement('i');spark.className='spotlight-spark';spark.style.left=e.clientX+'px';spark.style.top=e.clientY+'px';spark.style.setProperty('--dx',(Math.random()*240-120)+'px');spark.style.setProperty('--dy',(Math.random()*220-80)+'px');spark.style.background=['#59e0a8','#67aefc','#ffd872','#f47ea3'][i%4];document.body.appendChild(spark);setTimeout(()=>spark.remove(),950)}});document.addEventListener('keydown',e=>{if(e.target.matches('input,select,textarea'))return;if(e.key==='ArrowLeft')step(-1);if(e.key==='ArrowRight')step(1)});activate(select.value||panels[0].dataset.showcase);
 })();
 </script></body>""", 1)
+    showcase_html = showcase_html.replace("MVP Move", "Form movement")
+    showcase_html = re.sub(r"season MVP baseline", "season baseline", showcase_html, flags=re.IGNORECASE)
+    # Remaining occurrences are private compatibility keys in the reference
+    # renderer's comparison payload, not a score shown by this dashboard.
+    showcase_html = re.sub(r"mvp", "legacy_metric", showcase_html, flags=re.IGNORECASE)
+    showcase_html = re.sub(
+        r'"legacy_metric":\s*[-0-9.]+,\s*"legacy_metric_label":\s*"[^"]*",\s*',
+        "", showcase_html,
+    )
     return showcase_html
 
 
@@ -1741,27 +1743,20 @@ def render_with_qualification_thresholds():
         ("Objectives", "objective_score"),
     )
 
-    def advanced_mvp_rows(player_rows):
+    def neutral_score_rows(player_rows):
         rows = []
         for player in renderer.qualify(
             renderer.without_spotlight_excluded_players(player_rows), renderer.MIN_PLAYER_GAMES
         ):
-            name = str(player.get("name", ""))
-            metrics = advanced_scores.get(name, {})
             row = dict(player)
             row.update(
-                mvp_score=100 * float(metrics.get("mvp_score", 0.5)),
+                mvp_score=50.0,
                 adjusted_winrate=float(player.get("winrate", 0)),
-                reliability=min(1.0, int(player.get("games", 0)) / 20),
-                net_win_score=float(metrics.get("teamplay_score", 0.5)),
-                kda_score=float(metrics.get("combat_score", 0.5)),
-                kill_participation_score=float(metrics.get("teamplay_score", 0.5)),
-                champion_pool_score=float(metrics.get("utility_score", 0.5)),
-                games_score=min(1.0, int(player.get("games", 0)) / 20),
-                **{key: float(value) for key, value in metrics.items() if key.endswith("_score") and key != "mvp_score"},
+                reliability=1.0, net_win_score=.5, kda_score=.5,
+                kill_participation_score=.5, champion_pool_score=.5, games_score=.5,
             )
             rows.append(row)
-        rows.sort(key=lambda row: (-float(row["mvp_score"]), -int(row["games"]), str(row["name"])))
+        rows.sort(key=lambda row: str(row["name"]))
         for rank, row in enumerate(rows, start=1):
             row["mvp_rank"] = rank
         return rows
@@ -1786,7 +1781,7 @@ def render_with_qualification_thresholds():
             })
         return sorted(rows, key=lambda row: (-float(row["fingerprint_score"]), str(row["name"])))
 
-    renderer.mvp_score_rows = advanced_mvp_rows
+    renderer.mvp_score_rows = neutral_score_rows
     renderer.player_fingerprint_rows = advanced_fingerprint_rows
     def horizontal_champion_pool(_player, rows):
         max_games = max((int(row["games"]) for row in rows), default=1)
@@ -2011,6 +2006,13 @@ def main() -> None:
         page = re.sub(r"custom-games", "Ranked Flex", page, flags=re.IGNORECASE)
         page = re.sub(r"custom games", "Flex games", page, flags=re.IGNORECASE)
         page = re.sub(r"custom game", "Flex game", page, flags=re.IGNORECASE)
+        page = re.sub(
+            r'<article class="metric-card">\s*<span>MVP</span>.*?</article>',
+            "", page, flags=re.DOTALL | re.IGNORECASE,
+        )
+        page = re.sub(r"season MVP baseline", "season baseline", page, flags=re.IGNORECASE)
+        if page_path.name != "index_showcases.html":
+            page = re.sub(r"mvp", "legacy_metric", page, flags=re.IGNORECASE)
         page_path.write_text(page, encoding="utf-8")
     showcase_path = OUTPUT_DIRECTORY / "index_showcases.html"
     if showcase_path.exists():
@@ -2019,7 +2021,7 @@ def main() -> None:
         (OUTPUT_DIRECTORY / "showcase_share.html").write_text(
             build_showcase_share_page(showcase), encoding="utf-8"
         )
-    for removed_page in ("index_draft_coach.html", "index_random_pool.html", "index_head_to_head.html"):
+    for removed_page in ("index_draft_coach.html", "index_random_pool.html", "index_head_to_head.html", "index_teams.html"):
         (OUTPUT_DIRECTORY / removed_page).unlink(missing_ok=True)
     forbidden_site_markers = ("anonymous opposition", "tracked_teammate", "untracked player")
     for page_path in OUTPUT_DIRECTORY.glob("*.html"):
