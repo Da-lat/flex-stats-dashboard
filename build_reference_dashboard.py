@@ -116,6 +116,18 @@ def canonical_champion_name(name: object) -> str:
     return "Fiddlesticks" if value.casefold() == "fiddlesticks" else value
 
 
+def dashboard_champion_icon_url(name: object) -> str:
+    """Return the current dashboard icon URL, including post-Data Dragon picks."""
+    champion = canonical_champion_name(name)
+    community_id = COMMUNITY_DRAGON_ICON_IDS.get(champion.casefold())
+    if community_id is not None:
+        return (
+            "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/"
+            f"global/default/v1/champion-icons/{community_id}.png"
+        )
+    return f"https://ddragon.leagueoflegends.com/cdn/{DATA_DRAGON_VERSION}/img/champion/{champion}.png"
+
+
 def is_meaningful_match(info: dict) -> bool:
     if int(info.get("gameDuration", 0) or 0) < MINIMUM_GAME_SECONDS:
         return False
@@ -1538,6 +1550,7 @@ def build_showcase_share_page(showcase_html: str) -> str:
     )
     for match in section_pattern.finditer(showcase_html):
         player_id, icon, name, summary, games, winrate, kda, champion, champion_detail = match.groups()
+        highlights = showcase_player_highlights().get(player_id, {})
         players.append({
             "id": player_id,
             "icon": icon,
@@ -1548,6 +1561,12 @@ def build_showcase_share_page(showcase_html: str) -> str:
             "kda": kda.strip(),
             "champion": champion.strip(),
             "champion_detail": champion_detail.strip(),
+            "top_champions": [
+                {"name": top_name, "games": top_games, "icon": dashboard_champion_icon_url(top_name)}
+                for top_name, top_games in highlights.get("champions", [])
+            ],
+            "best_label": highlights.get("best_label", "-"),
+            "best_value": round(float(highlights.get("best_value", 0)), 1),
         })
     data = json.dumps(players, ensure_ascii=False).replace("</", "<\\/")
     options = "".join(f'<option value="{escape(row["id"])}">{escape(row["name"])}</option>' for row in players)
@@ -1558,14 +1577,14 @@ def build_showcase_share_page(showcase_html: str) -> str:
 :root{{--bg:#070c12;--panel:#111b27;--line:#2a3b4f;--text:#f5f8fc;--muted:#9fc4e4;--mint:#54e0a4;--blue:#69aefc}}
 *{{box-sizing:border-box}} body{{margin:0;min-height:100vh;background:radial-gradient(circle at 15% 10%,#143653 0,transparent 32%),radial-gradient(circle at 90% 85%,#163e32 0,transparent 35%),var(--bg);color:var(--text);font-family:Inter,Segoe UI,sans-serif;padding:28px}}
 .controls{{max-width:860px;margin:0 auto 18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}} select,button,a{{border:1px solid var(--line);border-radius:9px;background:#111b27;color:var(--text);padding:10px 14px;font-weight:750;text-decoration:none;cursor:pointer}} button.primary{{background:linear-gradient(135deg,#187f61,#276fb1);border-color:#54e0a4}} .card{{position:relative;overflow:hidden;max-width:860px;min-height:500px;margin:auto;padding:42px;border:1px solid #3a536a;border-radius:26px;background:linear-gradient(145deg,rgba(18,31,45,.97),rgba(8,15,24,.98));box-shadow:0 30px 90px #0009}}
-.card:before{{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 45%,rgba(84,224,164,.08));pointer-events:none}} .champ-art{{position:absolute;right:-45px;bottom:-55px;width:390px;height:390px;object-fit:cover;opacity:.18;filter:saturate(1.35);border-radius:50%}} .eyebrow{{color:var(--mint);font-size:.78rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase}} h1{{font-size:clamp(3rem,8vw,6.8rem);line-height:.86;margin:17px 0 20px;letter-spacing:-.06em}} .summary{{position:relative;max-width:620px;color:#c5d9ec;font-size:1.08rem;line-height:1.6}} .stats{{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:32px 0}} .stat,.signature{{padding:16px;background:#101d2bdb;border:1px solid var(--line);border-radius:13px}} .stat span,.signature span{{display:block;color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.08em}} .stat b{{display:block;font-size:1.6rem;margin-top:7px}} .signature{{position:relative;display:flex;align-items:center;gap:14px;max-width:470px;border-color:#3d806b}} .signature img{{width:62px;height:62px;border-radius:12px}} .signature strong{{display:block;font-size:1.35rem;margin:4px 0}} .signature small{{color:#b9cee2}} .brand{{position:absolute;right:30px;top:28px;color:#91abc3;font-size:.72rem;font-weight:900;letter-spacing:.12em}}
+.card:before{{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 45%,rgba(84,224,164,.08));pointer-events:none}} .champ-art{{position:absolute;right:-45px;bottom:-55px;width:390px;height:390px;object-fit:cover;opacity:.18;filter:saturate(1.35);border-radius:50%}} .eyebrow{{color:var(--mint);font-size:.78rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase}} h1{{font-size:clamp(3rem,8vw,6.8rem);line-height:.86;margin:17px 0 20px;letter-spacing:-.06em}} .summary{{position:relative;max-width:620px;color:#c5d9ec;font-size:1.08rem;line-height:1.6}} .stats{{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:32px 0}} .stat,.signature{{padding:16px;background:#101d2bdb;border:1px solid var(--line);border-radius:13px}} .stat span,.signature span{{display:block;color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.08em}} .stat b{{display:block;font-size:1.6rem;margin-top:7px}} .signature{{position:relative;display:grid;grid-template-columns:62px minmax(0,1fr) auto;align-items:center;gap:14px;max-width:680px;border-color:#3d806b}} .signature>img{{width:62px;height:62px;border-radius:12px}} .signature strong{{display:block;font-size:1.35rem;margin:4px 0}} .signature small{{color:#b9cee2}} .share-top-picks{{display:flex;gap:6px}}.share-top-pick{{position:relative}}.share-top-pick img{{width:38px;height:38px;border-radius:7px;border:1px solid #365069}}.share-top-pick small{{position:absolute;right:-3px;bottom:-4px;padding:1px 4px;border-radius:5px;background:#071019;color:#fff;font-size:.6rem}}.share-best{{padding-left:12px;border-left:1px solid #315846}}.share-best b{{color:var(--mint)}}.brand{{position:absolute;right:30px;top:28px;color:#91abc3;font-size:.72rem;font-weight:900;letter-spacing:.12em}}
 .hint{{max-width:860px;margin:14px auto;color:#91abc3;font-size:.84rem;text-align:center}} @media(max-width:650px){{body{{padding:12px}}.card{{padding:28px 20px;min-height:560px}}.stats{{grid-template-columns:repeat(2,1fr)}}.champ-art{{width:270px;height:270px}}}} @media print{{body{{padding:0;background:#070c12;-webkit-print-color-adjust:exact;print-color-adjust:exact}}.controls,.hint{{display:none}}.card{{max-width:none;width:100%;height:100vh;border:0;border-radius:0;box-shadow:none}}}}
-</style></head><body>
+</style><style>.signature{{grid-template-columns:62px minmax(0,1fr) minmax(150px,auto) minmax(150px,auto);max-width:760px}}@media(max-width:650px){{.signature{{grid-template-columns:62px minmax(0,1fr)}}.signature>div:nth-of-type(n+2){{grid-column:1/-1}}.share-best{{padding:10px 0 0;border-left:0;border-top:1px solid #315846}}}}</style></head><body>
 <div class="controls"><a href="index_showcases.html">← Full showcases</a><select id="player-select">{options}</select><button class="primary" id="share-button">Share card</button><button id="copy-button">Copy link</button><button onclick="window.print()">Save as PDF</button></div>
-<main class="card" id="card"><div class="brand">LEAGUE FLEX</div><img class="champ-art" id="champ-art" alt=""><div class="eyebrow">PLAYER SHOWCASE</div><h1 id="name"></h1><p class="summary" id="summary"></p><div class="stats"><div class="stat"><span>Games</span><b id="games"></b></div><div class="stat"><span>Win rate</span><b id="winrate"></b></div><div class="stat"><span>KDA</span><b id="kda"></b></div></div><div class="signature"><img id="champ-icon" alt=""><div><span>Signature champion</span><strong id="champion"></strong><small id="champion-detail"></small></div></div></main>
+<main class="card" id="card"><div class="brand">LEAGUE FLEX</div><img class="champ-art" id="champ-art" alt=""><div class="eyebrow">PLAYER SHOWCASE</div><h1 id="name"></h1><p class="summary" id="summary"></p><div class="stats"><div class="stat"><span>Games</span><b id="games"></b></div><div class="stat"><span>Win rate</span><b id="winrate"></b></div><div class="stat"><span>KDA</span><b id="kda"></b></div></div><div class="signature"><img id="champ-icon" alt=""><div><span>Most played champion</span><strong id="champion"></strong><small id="champion-detail"></small></div><div><span>Top 3 champions</span><div class="share-top-picks" id="share-top-picks"></div></div><div class="share-best"><span>Strongest impact stat</span><b id="share-best-label"></b><small id="share-best-value"></small></div></div></main>
 <p class="hint">This page has its own player-specific URL. Share it directly or use “Save as PDF” for a compact keepsake.</p>
 <script>const players={data};const select=document.getElementById('player-select');const byId=Object.fromEntries(players.map(p=>[p.id,p]));
-function show(id,write=true){{const p=byId[id]||players[0];if(!p)return;select.value=p.id;for(const key of ['name','summary','games','winrate','kda','champion'])document.getElementById(key).textContent=p[key];document.getElementById('champion-detail').textContent=p.champion_detail;for(const id of ['champ-art','champ-icon'])document.getElementById(id).src=p.icon;if(write)history.replaceState(null,'','?player='+encodeURIComponent(p.id));document.title=p.name+' — League Flex Player Card'}}
+function show(id,write=true){{const p=byId[id]||players[0];if(!p)return;select.value=p.id;for(const key of ['name','summary','games','winrate','kda','champion'])document.getElementById(key).textContent=p[key];document.getElementById('champion-detail').textContent=p.champion_detail;document.getElementById('share-top-picks').innerHTML=p.top_champions.map(row=>`<span class="share-top-pick" title="${{row.name}}: ${{row.games}} games"><img src="${{row.icon}}" alt="${{row.name}}"><small>${{row.games}}g</small></span>`).join('');document.getElementById('share-best-label').textContent=p.best_label;document.getElementById('share-best-value').textContent=p.best_value.toFixed(1)+'/100 role-relative';for(const id of ['champ-art','champ-icon'])document.getElementById(id).src=p.icon;if(write)history.replaceState(null,'','?player='+encodeURIComponent(p.id));document.title=p.name+' — League Flex Player Card'}}
 select.addEventListener('change',()=>show(select.value));document.getElementById('copy-button').addEventListener('click',async e=>{{await navigator.clipboard.writeText(location.href);e.target.textContent='Copied!';setTimeout(()=>e.target.textContent='Copy link',1400)}});document.getElementById('share-button').addEventListener('click',async()=>{{const p=byId[select.value];if(navigator.share)await navigator.share({{title:document.title,text:p.summary,url:location.href}});else document.getElementById('copy-button').click()}});show(new URLSearchParams(location.search).get('player'),false);</script></body></html>"""
 
 
@@ -1612,6 +1631,11 @@ def enhance_showcases(showcase_html: str) -> str:
     """Give Showcases a stronger visual identity and add a player-aware share action."""
     showcase_html = showcase_html.replace("LoL Player Showcases", "League Flex Showcases")
     showcase_html = showcase_html.replace(
+        "</head>",
+        '<style id="showcase-highlight-overrides">.showcase-top-pick{grid-template-columns:30px auto!important;flex:0 0 auto!important}.showcase-top-pick b{display:none}</style></head>',
+        1,
+    )
+    showcase_html = showcase_html.replace(
         "Full-page player recaps, signature picks, personal awards, and match-history arcs from the same Ranked Flex dataset.",
         "Your Flex careers turned into player stories: signature picks, personal records, form arcs, and friendly rivalries.</p><p class=\"showcase-model-note\"><b>New role-relative model:</b> damage/min, gold/min, teamplay, vision, utility and objectives are compared with tracked players in the same role.",
     )
@@ -1642,9 +1666,9 @@ def enhance_showcases(showcase_html: str) -> str:
         )
     for player_id, highlight in showcase_player_highlights().items():
         champion_chips = "".join(
-            '<span class="showcase-top-pick">'
-            f'<img src="{escape("https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/" + str(COMMUNITY_DRAGON_ICON_IDS[champion.casefold()]) + ".png" if champion.casefold() in COMMUNITY_DRAGON_ICON_IDS else "https://ddragon.leagueoflegends.com/cdn/" + DATA_DRAGON_VERSION + "/img/champion/" + champion + ".png")}" alt="{escape(champion)}">'
-            f'<b>{escape(champion)}</b><small>{games}g</small></span>'
+            f'<span class="showcase-top-pick" title="{escape(champion)}: {games} games">'
+            f'<img src="{escape(dashboard_champion_icon_url(champion))}" alt="{escape(champion)}">'
+            f'<small>{games}g</small></span>'
             for champion, games in highlight["champions"]
         )
         extra = (
