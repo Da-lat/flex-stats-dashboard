@@ -24,6 +24,22 @@ ROLE_MAP = {"MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUPP"}
 VALID_ROLES = {"TOP", "JUNGLE", "MID", "BOT", "SUPP"}
 MINIMUM_GAME_SECONDS = 10 * 60
 UK_TIMEZONE = ZoneInfo("Europe/London")
+PING_TYPES = {
+    "allInPings": "All In",
+    "assistMePings": "Assist Me",
+    "basicPings": "Basic",
+    "commandPings": "Command",
+    "dangerPings": "Danger",
+    "enemyMissingPings": "Enemy Missing",
+    "enemyVisionPings": "Enemy Vision",
+    "getBackPings": "Get Back",
+    "holdPings": "Hold",
+    "needVisionPings": "Need Vision",
+    "onMyWayPings": "On My Way",
+    "pushPings": "Push",
+    "retreatPings": "Retreat",
+    "visionClearedPings": "Vision Cleared",
+}
 SHARED_NAV_HTML = """<nav class="shared-dashboard-nav">
     <a href="index.html#overview">Dashboard</a>
     <a href="index.html#players">Players</a>
@@ -214,6 +230,11 @@ def tracked_match_log() -> list[dict[str, object]]:
                     "kill_participation": p.get("challenges", {}).get("killParticipation"),
                     "lane_advantage": p.get("challenges", {}).get("laningPhaseGoldExpAdvantage"),
                     "skillshots_dodged": p.get("challenges", {}).get("skillshotsDodged"),
+                    "pings": {
+                        key: int(p.get(key, 0) or 0)
+                        for key in PING_TYPES
+                        if key in p
+                    },
                 }
                 for p in tracked_participants
             ],
@@ -331,6 +352,68 @@ def advanced_stat_awards() -> list[dict[str, object]]:
         ]
     )
     return awards
+
+
+def experimental_ping_chart() -> str:
+    player_stats: dict[str, dict[str, object]] = {}
+    for match in tracked_match_log():
+        for participant in match["participant_stats"]:
+            name = str(participant["name"])
+            record = player_stats.setdefault(
+                name,
+                {
+                    "games": 0,
+                    "totals": {key: 0 for key in PING_TYPES},
+                    "samples": {key: 0 for key in PING_TYPES},
+                },
+            )
+            record["games"] += 1
+            for key, value in participant["pings"].items():
+                record["totals"][key] += int(value)
+                record["samples"][key] += 1
+
+    averages = {
+        name: {
+            key: record["totals"][key] / record["samples"][key]
+            if record["samples"][key]
+            else 0.0
+            for key in PING_TYPES
+        }
+        for name, record in player_stats.items()
+    }
+    column_max = {
+        key: max((row[key] for row in averages.values()), default=0.0)
+        for key in PING_TYPES
+    }
+    headers = "".join(
+        f'<th data-type="number" title="Average {escape(label)} pings per recorded game">{escape(label)}</th>'
+        for label in PING_TYPES.values()
+    )
+    rows = []
+    for name in sorted(player_stats):
+        cells = []
+        for key in PING_TYPES:
+            value = averages[name][key]
+            strength = value / column_max[key] if column_max[key] else 0.0
+            alpha = 0.04 + (0.62 * strength)
+            samples = int(player_stats[name]["samples"][key])
+            cells.append(
+                f'<td class="ping-heat-cell" data-sort="{value:.6f}" '
+                f'style="background:rgba(98,168,255,{alpha:.3f})" '
+                f'title="{escape(PING_TYPES[key])}: {value:.2f} average across {samples} recorded games">{value:.2f}</td>'
+            )
+        rows.append(
+            f'<tr><td class="ping-player"><strong>{escape(name)}</strong></td>'
+            f'<td class="number-cell" data-sort="{player_stats[name]["games"]}">{player_stats[name]["games"]}</td>'
+            f'{"".join(cells)}</tr>'
+        )
+    return f"""
+    <section id="ping-averages" class="section ping-experiment">
+      <div class="section-title"><div><h2>Ping Averages</h2><p class="note">Average pings per tracked-player game. Colour intensity is scaled independently within each ping type; hover a cell for its recorded sample.</p></div></div>
+      <section class="table-panel"><div class="section-heading"><h3>Communication heatmap</h3><small>{len(player_stats)} tracked players · {len(PING_TYPES)} ping types</small></div><div class="table-wrap ping-table-wrap"><table class="sortable-table ping-table"><thead><tr><th>Player</th><th data-type="number">Games</th>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table></div></section>
+    </section>
+    <style>.ping-table-wrap{{max-height:720px;overflow:auto}}.ping-table{{min-width:1700px}}.ping-table th{{white-space:normal;min-width:88px;line-height:1.15}}.ping-table th:first-child{{min-width:120px}}.ping-player{{position:sticky;left:0;z-index:1;background:#111b27}}.ping-heat-cell{{text-align:center;font-weight:800;font-variant-numeric:tabular-nums}}</style>
+    """
 
 
 def roster_matches_section() -> str:
@@ -687,6 +770,9 @@ def main() -> None:
         upset_end = experimental.find("</section>", upset_start)
         if upset_end >= 0:
             experimental = experimental[:upset_start] + experimental[upset_end + len("</section>"):]
+    experimental = experimental.replace(
+        "</main>", experimental_ping_chart() + "</main>", 1
+    )
     experimental_path.write_text(experimental, encoding="utf-8")
     for page_path in OUTPUT_DIRECTORY.glob("*.html"):
         page = page_path.read_text(encoding="utf-8")
