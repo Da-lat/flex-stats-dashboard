@@ -223,23 +223,29 @@ def tracked_match_log() -> list[dict[str, object]]:
 
 def advanced_stat_awards() -> list[dict[str, object]]:
     totals: dict[str, dict[str, float]] = {}
-    largest_cs_gap: tuple[float, str, dict[str, object], dict[str, object]] | None = None
     for match in tracked_match_log():
         for participant in match["participant_stats"]:
             name = str(participant["name"])
-            record = totals.setdefault(name, {"games": 0, "damage": 0, "vision": 0})
+            record = totals.setdefault(
+                name,
+                {"games": 0, "damage": 0, "vision": 0, "cs_gap_total": 0, "cs_gap_games": 0},
+            )
             record["games"] += 1
             record["damage"] += int(participant["damage"])
             record["vision"] += int(participant["vision"])
             cs_gap = participant.get("max_cs_advantage")
             if cs_gap is not None:
-                candidate = (float(cs_gap), name, participant, match)
-                if largest_cs_gap is None or candidate[0] > largest_cs_gap[0]:
-                    largest_cs_gap = candidate
+                record["cs_gap_total"] += float(cs_gap)
+                record["cs_gap_games"] += 1
 
     qualified = [(name, row) for name, row in totals.items() if row["games"] >= 10]
     highest_damage = max(qualified, key=lambda item: item[1]["damage"] / item[1]["games"])
     highest_vision = max(qualified, key=lambda item: item[1]["vision"] / item[1]["games"])
+    cs_gap_qualified = [item for item in qualified if item[1]["cs_gap_games"] >= 10]
+    highest_cs_gap = max(
+        cs_gap_qualified,
+        key=lambda item: item[1]["cs_gap_total"] / item[1]["cs_gap_games"],
+    )
     damage_name, damage = highest_damage
     vision_name, vision = highest_vision
     awards = [
@@ -260,19 +266,17 @@ def advanced_stat_awards() -> list[dict[str, object]]:
             "badge": "EYE",
         },
     ]
-    if largest_cs_gap is not None:
-        gap, name, participant, match = largest_cs_gap
-        awards.append(
-            {
-                "title": "Player Gap",
-                "winner": name,
-                "stat": f"+{gap:,.1f} maximum CS advantage",
-                "detail": f'{participant["champion"]} ({participant["role"]}) · Match {match["number"]}',
-                "theme": "gold",
-                "badge": "CS",
-                "match_id": match["number"],
-            }
-        )
+    gap_name, gap = highest_cs_gap
+    awards.append(
+        {
+            "title": "Player Gap",
+            "winner": gap_name,
+            "stat": f'+{gap["cs_gap_total"] / gap["cs_gap_games"]:,.1f} average max CS advantage per game',
+            "detail": f'Average maxCsAdvantageOnLaneOpponent over {int(gap["cs_gap_games"])} recorded games.',
+            "theme": "gold",
+            "badge": "CS",
+        }
+    )
     return awards
 
 
