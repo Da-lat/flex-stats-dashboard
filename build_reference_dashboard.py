@@ -1023,6 +1023,42 @@ def order_custom_meta_by_tier(html: str) -> str:
     return html
 
 
+def clean_and_order_overview_charts(html: str) -> str:
+    """Remove the redundant champion-volume panel and balance chart pairs."""
+    grid_start = html.find('<div class="chart-grid">')
+    players_start = html.find('<section id="players"', grid_start)
+    if grid_start < 0 or players_start < 0:
+        return html
+    opening_end = html.find(">", grid_start) + 1
+    segment = html[opening_end:players_start]
+    panel_pattern = re.compile(r'<section class="chart-panel">.*?</section>', flags=re.DOTALL)
+    panels = panel_pattern.findall(segment)
+    panels = [panel for panel in panels if "<h3>Most Played Champions</h3>" not in panel]
+    preferred_order = {
+        title: index
+        for index, title in enumerate(
+            (
+                "Top Player Win Rate (5+ Games)",
+                "Bottom Player Win Rate (5+ Games)",
+                "Top Champion Win Rate",
+                "Bottom Champion Win Rate",
+                "Player KDA",
+                "Match Volume By Weekday",
+            )
+        )
+    }
+
+    def panel_key(panel: str) -> int:
+        heading = re.search(r'<h3>(.*?)</h3>', panel, flags=re.DOTALL)
+        return preferred_order.get(heading.group(1).strip() if heading else "", 99)
+
+    ordered_panels = sorted(panels, key=panel_key)
+    remainder = panel_pattern.sub("", segment)
+    rebuilt = "\n        " + "\n        ".join(ordered_panels) + remainder
+    rebuilt = re.sub(r"[ \t]+(?=\n)", "", rebuilt)
+    return html[:opening_end] + rebuilt + html[players_start:]
+
+
 def roster_matches_section() -> str:
     rows = tracked_match_log()
     def champion_pairs_html(champions: list[str]) -> str:
@@ -1360,6 +1396,7 @@ def main() -> None:
         "<style>.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}.champion-match-links{max-width:620px;padding:8px 0;line-height:1.8}.champion-match-links a{white-space:nowrap}.compact-champion-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 10px}.compact-champion-item{display:grid;grid-template-columns:32px minmax(70px,1fr) 42px;align-items:center;gap:8px;min-height:40px;padding:4px 8px 4px 5px;background:#172231;border:1px solid #2a394b;border-radius:7px}.compact-champion-item img{width:30px;height:30px;object-fit:cover;border-radius:6px}.champion-volume-track{display:block;height:9px;overflow:hidden;background:#253448;border-radius:999px}.champion-volume-track i{display:block;height:100%;background:linear-gradient(90deg,#3e8ee8,#72b5ff);border-radius:inherit}.compact-champion-item b,.vertical-champion-item b{color:#dcecff;font-size:.8rem;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}.vertical-chart-wrap{overflow-x:auto;padding:4px 2px 10px}.vertical-champion-strip{display:flex;align-items:flex-end;gap:7px;min-width:max-content;height:210px;padding:4px 8px}.vertical-champion-item{display:grid;grid-template-rows:18px 145px 32px;justify-items:center;gap:4px;width:34px;height:100%}.vertical-champion-item b{text-align:center}.vertical-volume-track{display:flex;align-items:flex-end;width:13px;height:145px;overflow:hidden;background:#253448;border-radius:5px}.vertical-volume-track i{display:block;width:100%;background:linear-gradient(0deg,#3e8ee8,#72b5ff);border-radius:inherit}.vertical-champion-item img{width:30px;height:30px;object-fit:cover;border-radius:6px;border:1px solid #3a4d63}@media(max-width:1050px){.compact-champion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.compact-champion-grid{grid-template-columns:1fr}.compact-champion-item{grid-template-columns:30px minmax(60px,1fr) 38px}.compact-champion-item img{width:28px;height:28px}}</style></head>",
         1,
     )
+    rendered = clean_and_order_overview_charts(rendered)
     index_path.write_text(rendered, encoding="utf-8")
     # This renderer's experimental page intentionally defines a pocket pick as
     # a 2–4 game novelty. It conflicts with the roster dashboard's 10-game
