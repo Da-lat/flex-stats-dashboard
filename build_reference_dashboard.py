@@ -371,30 +371,39 @@ def render_with_qualification_thresholds() -> None:
     )
     renderer.heat_color = winrate_color
     renderer.heat_text_color = winrate_text_color
-    def compact_champion_pool(_player, rows):
+    def horizontal_champion_pool(_player, rows):
         max_games = max((int(row["games"]) for row in rows), default=1)
-
-        def item(row):
+        items = []
+        for row in rows:
             champion = str(row["champion"])
             games = int(row["games"])
             games_label = "game" if games == 1 else "games"
             volume = max(3.0, games / max_games * 100)
-            return (
+            items.append(
                 f'<div class="compact-champion-item" title="{escape(champion)}: {games} {games_label}">'
                 f'<img src="{escape(renderer.champion_icon_url(champion))}" alt="{escape(champion)}">'
-                f'<span class="compact-champion-name">{escape(champion)}</span>'
                 f'<span class="champion-volume-track"><i style="width:{volume:.1f}%"></i></span>'
                 f'<b>{games}g</b></div>'
             )
+        return f'<div class="compact-champion-grid horizontal-chart">{"".join(items)}</div>'
 
-        return (
-            '<div class="compact-champion-pool"><div class="champion-pool-list-heading">'
-            '<span>Champion usage</span><small>Games played · highest to lowest</small></div>'
-            f'<div class="compact-champion-grid">{"".join(item(row) for row in rows)}</div></div>'
-        )
+    def vertical_champion_pool(_player, rows):
+        max_games = max((int(row["games"]) for row in rows), default=1)
+        items = []
+        for row in rows:
+            champion = str(row["champion"])
+            games = int(row["games"])
+            games_label = "game" if games == 1 else "games"
+            height = max(4.0, games / max_games * 100)
+            items.append(
+                f'<div class="vertical-champion-item" title="{escape(champion)}: {games} {games_label}">'
+                f'<b>{games}</b><span class="vertical-volume-track"><i style="height:{height:.1f}%"></i></span>'
+                f'<img src="{escape(renderer.champion_icon_url(champion))}" alt="{escape(champion)}"></div>'
+            )
+        return f'<div class="vertical-champion-strip">{"".join(items)}</div>'
 
-    renderer.champion_pool_horizontal_svg = compact_champion_pool
-    renderer.champion_pool_vertical_svg = lambda _player, _rows: ""
+    renderer.champion_pool_horizontal_svg = horizontal_champion_pool
+    renderer.champion_pool_vertical_svg = vertical_champion_pool
     renderer.build_dashboard(EXPORTED_HISTORY, OUTPUT_DIRECTORY / "index.html")
 
 
@@ -413,12 +422,7 @@ def main() -> None:
     rendered = rendered.replace("LoL Customs Dashboard", "League Flex Dashboard")
     rendered = rendered.replace(
         "Browse one player at a time. Unique-pick rate is unique champions divided by games, so champion pool depth is not just raw volume.",
-        "Browse one player at a time. Every champion is ordered by games played; longer bars mean more games.",
-    )
-    rendered = re.sub(
-        r'<button type="button" class="orientation-button[^>]*>.*?</button>',
-        "",
-        rendered,
+        "Browse one player at a time. Switch between compact horizontal and vertical icon charts; longer bars mean more games.",
     )
     rendered = re.sub(r'\s*<div class="header-actions"[^>]*>.*?</div>', "", rendered, count=1, flags=re.DOTALL)
     rendered = re.sub(r'\s*<a href="#match-history">Matches</a>', "", rendered, count=1)
@@ -490,7 +494,7 @@ def main() -> None:
     rendered = rendered.replace("</main>", tracked_combos + champion_history + matches + "</main>", 1)
     rendered = rendered.replace(
         "</head>",
-        "<style>.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}.champion-match-links{max-width:620px;padding:8px 0;line-height:1.8}.champion-match-links a{white-space:nowrap}.compact-champion-pool{padding:2px}.champion-pool-list-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;color:#8fa8c0;font-size:.7rem;font-weight:800;text-transform:uppercase}.champion-pool-list-heading small{font-size:.66rem}.compact-champion-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 14px}.compact-champion-item{display:grid;grid-template-columns:36px minmax(90px,150px) minmax(100px,1fr) 58px;align-items:center;gap:10px;min-height:46px;padding:5px 10px 5px 6px;background:#172231;border:1px solid #2a394b;border-left:4px solid #62a8ff;border-radius:7px}.compact-champion-item img{width:34px;height:34px;object-fit:cover;border-radius:6px}.compact-champion-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800}.champion-volume-track{display:block;height:10px;overflow:hidden;background:#253448;border-radius:999px}.champion-volume-track i{display:block;height:100%;background:linear-gradient(90deg,#3e8ee8,#72b5ff);border-radius:inherit}.compact-champion-item b{color:#dcecff;font-size:.84rem;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}@media(max-width:900px){.compact-champion-grid{grid-template-columns:1fr}}@media(max-width:520px){.champion-pool-list-heading small{display:none}.compact-champion-item{grid-template-columns:30px minmax(72px,110px) minmax(60px,1fr) 46px;gap:6px}.compact-champion-item img{width:29px;height:29px}.compact-champion-item b{font-size:.74rem}}</style></head>",
+        "<style>.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}.champion-match-links{max-width:620px;padding:8px 0;line-height:1.8}.champion-match-links a{white-space:nowrap}.compact-champion-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 10px}.compact-champion-item{display:grid;grid-template-columns:32px minmax(70px,1fr) 42px;align-items:center;gap:8px;min-height:40px;padding:4px 8px 4px 5px;background:#172231;border:1px solid #2a394b;border-radius:7px}.compact-champion-item img{width:30px;height:30px;object-fit:cover;border-radius:6px}.champion-volume-track{display:block;height:9px;overflow:hidden;background:#253448;border-radius:999px}.champion-volume-track i{display:block;height:100%;background:linear-gradient(90deg,#3e8ee8,#72b5ff);border-radius:inherit}.compact-champion-item b,.vertical-champion-item b{color:#dcecff;font-size:.8rem;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}.vertical-chart-wrap{overflow-x:auto;padding:4px 2px 10px}.vertical-champion-strip{display:flex;align-items:flex-end;gap:7px;min-width:max-content;height:210px;padding:4px 8px}.vertical-champion-item{display:grid;grid-template-rows:18px 145px 32px;justify-items:center;gap:4px;width:34px;height:100%}.vertical-champion-item b{text-align:center}.vertical-volume-track{display:flex;align-items:flex-end;width:13px;height:145px;overflow:hidden;background:#253448;border-radius:5px}.vertical-volume-track i{display:block;width:100%;background:linear-gradient(0deg,#3e8ee8,#72b5ff);border-radius:inherit}.vertical-champion-item img{width:30px;height:30px;object-fit:cover;border-radius:6px;border:1px solid #3a4d63}@media(max-width:1050px){.compact-champion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.compact-champion-grid{grid-template-columns:1fr}.compact-champion-item{grid-template-columns:30px minmax(60px,1fr) 38px}.compact-champion-item img{width:28px;height:28px}}</style></head>",
         1,
     )
     index_path.write_text(rendered, encoding="utf-8")
