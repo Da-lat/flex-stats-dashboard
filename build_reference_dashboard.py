@@ -2023,8 +2023,13 @@ def main() -> None:
             )
     experimental = order_custom_meta_by_tier(experimental)
     pool_section = ""
+    pool_css = ""
     pool_start = experimental.find('<section id="experimental-player-pools"')
     if pool_start >= 0:
+        pool_css_start = experimental.find(".experimental-pool-browser {")
+        pool_css_end = experimental.find("</style>", pool_css_start)
+        if pool_css_start >= 0 and pool_css_end >= 0:
+            pool_css = experimental[pool_css_start:pool_css_end]
         pool_end = experimental.find('<section id="', pool_start + 1)
         if pool_end < 0:
             pool_end = experimental.find("</main>", pool_start)
@@ -2039,6 +2044,10 @@ def main() -> None:
     if pool_section:
         showcase_path = OUTPUT_DIRECTORY / "index_showcases.html"
         showcase_source = showcase_path.read_text(encoding="utf-8")
+        if pool_css:
+            showcase_source = showcase_source.replace(
+                "</head>", f'<style id="showcase-pool-style">{pool_css}</style></head>', 1
+            )
         showcase_source = showcase_source.replace(
             "</main>", pool_section + "</main>", 1
         )
