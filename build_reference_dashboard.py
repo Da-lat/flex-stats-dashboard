@@ -372,32 +372,24 @@ def render_with_qualification_thresholds() -> None:
     renderer.heat_color = winrate_color
     renderer.heat_text_color = winrate_text_color
     def compact_champion_pool(_player, rows):
-        def item(row, secondary=False):
+        def item(row):
             champion = str(row["champion"])
             games = int(row["games"])
             wins = int(row["wins"])
             winrate = float(row["winrate"])
             games_label = "game" if games == 1 else "games"
             return (
-                f'<div class="compact-champion-item{" secondary" if secondary else ""}" style="--wr-color:{winrate_color(winrate)}" title="{escape(champion)}: {games} {games_label}, {winrate * 100:.1f}% win rate">'
+                f'<div class="compact-champion-item" style="--wr-color:{winrate_color(winrate)}" title="{escape(champion)}: {games} {games_label}, {winrate * 100:.1f}% win rate">'
                 f'<img src="{escape(renderer.champion_icon_url(champion))}" alt="{escape(champion)}">'
                 f'<span class="compact-champion-name">{escape(champion)}</span>'
                 f'<span class="compact-champion-record">{wins}-{games - wins}</span>'
                 f'<b>{games}g</b><strong>{winrate * 100:.1f}%</strong></div>'
             )
 
-        featured = rows[:15]
-        remainder = rows[15:]
-        remainder_html = ""
-        if remainder:
-            remainder_html = (
-                f'<details class="champion-pool-remainder"><summary>Show all {len(remainder)} remaining champions</summary>'
-                f'<div class="champion-pool-secondary-grid">{"".join(item(row, True) for row in remainder)}</div></details>'
-            )
         return (
             '<div class="compact-champion-pool"><div class="champion-pool-list-heading">'
             '<span>Most played</span><small>Record · Games · Win rate</small></div>'
-            f'<div class="compact-champion-grid">{"".join(item(row) for row in featured)}</div>{remainder_html}</div>'
+            f'<div class="compact-champion-grid">{"".join(item(row) for row in rows)}</div></div>'
         )
 
     renderer.champion_pool_horizontal_svg = compact_champion_pool
@@ -420,7 +412,7 @@ def main() -> None:
     rendered = rendered.replace("LoL Customs Dashboard", "League Flex Dashboard")
     rendered = rendered.replace(
         "Browse one player at a time. Unique-pick rate is unique champions divided by games, so champion pool depth is not just raw volume.",
-        "Browse one player at a time. The 15 most-played champions are shown first; expand the remainder to see the full pool.",
+        "Browse one player at a time. Every champion played is shown, ordered by games played.",
     )
     rendered = re.sub(
         r'<button type="button" class="orientation-button[^>]*>.*?</button>',
