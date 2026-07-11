@@ -24,6 +24,7 @@ ROLE_MAP = {"MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUPP"}
 VALID_ROLES = {"TOP", "JUNGLE", "MID", "BOT", "SUPP"}
 MINIMUM_GAME_SECONDS = 10 * 60
 UK_TIMEZONE = ZoneInfo("Europe/London")
+DATA_DRAGON_VERSION = "16.13.1"
 PING_TYPES = {
     "allInPings": "All In",
     "assistMePings": "Assist Me",
@@ -975,7 +976,7 @@ def compact_champion_ownership_section(renderer) -> str:
         items.append(f'''
         <article class="compact-ownership-item" data-ownership-search="{escape(search)}">
           <img src="{escape(renderer.champion_icon_url(str(row['champion'])))}" alt="{escape(str(row['champion']))}">
-          <div class="ownership-champion"><strong>{escape(str(row['champion']))}</strong><small>{row['games']} games · {100 * float(row['winrate']):.1f}% WR · {row['pilots']} pilot{'s' if row['pilots'] != 1 else ''}</small></div>
+          <div class="ownership-champion"><strong>{escape(str(row['champion']))}</strong><small>{row['games']} game{'s' if row['games'] != 1 else ''} · {100 * float(row['winrate']):.1f}% WR · {row['pilots']} pilot{'s' if row['pilots'] != 1 else ''}</small></div>
           <div class="ownership-pilot ownership-best"><span>Best</span><strong>{escape(str(best['name']))}</strong><small>{100 * float(best['winrate']):.1f}% · {best['games']}g</small></div>
           <div class="ownership-pilot ownership-worst"><span>Worst</span><strong>{escape(str(worst['name']))}</strong><small>{100 * float(worst['winrate']):.1f}% · {worst['games']}g</small></div>
         </article>''')
@@ -1450,6 +1451,19 @@ def render_with_qualification_thresholds():
     renderer = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = renderer
     spec.loader.exec_module(renderer)
+    # Keep assets current, while treating Match-V5 as the source of truth for
+    # played champions so newly released picks cannot disappear from the site
+    # if a static roster snapshot lags behind Riot match history.
+    recorded_champions = {
+        str(participant["champion"])
+        for match in tracked_match_log()
+        for participant in match["participant_stats"]
+    }
+    renderer.CHAMPION_ROSTER_VERSION = DATA_DRAGON_VERSION
+    renderer.CHAMPION_ROSTER_SOURCE_URL = (
+        f"https://ddragon.leagueoflegends.com/cdn/{DATA_DRAGON_VERSION}/data/en_US/champion.json"
+    )
+    renderer.CHAMPION_ROSTER = tuple(sorted(set(renderer.CHAMPION_ROSTER) | recorded_champions))
     renderer.MIN_CHAMPION_GAMES = 10
     renderer.MIN_COMBO_GAMES = 10
     # Enforce the roster boundary at the renderer input so every downstream
