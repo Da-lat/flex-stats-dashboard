@@ -6,6 +6,7 @@ import json
 import re
 import sqlite3
 import sys
+from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -529,8 +530,8 @@ def advanced_stat_awards() -> list[dict[str, object]]:
 
 @lru_cache(maxsize=1)
 def role_normalized_player_scores() -> dict[str, dict[str, float]]:
-    """Score advanced Riot metrics against tracked peers playing the same role."""
-    metric_rows: dict[tuple[str, str], list[dict[str, float]]] = defaultdict(list)
+    """Build match-level impact scores against the full history for each role."""
+    games: list[dict[str, object]] = []
     for record in experimental_player_records():
         role = str(record["role"])
         if role not in VALID_ROLES:
@@ -538,74 +539,74 @@ def role_normalized_player_scores() -> dict[str, dict[str, float]]:
         participant = record["participant"]
         challenges = record["challenges"]
         minutes = max(1.0, float(record["minutes"]))
-        objectives = sum(float(value) for value in record["objectives"].values())
-        metric_rows[(str(record["name"]), role)].append({
-            "win": float(record["win"]),
+        gold = float(participant.get("goldEarned", 0) or 0)
+        objective_events = sum(float(value) for value in record["objectives"].values())
+        games.append({
+            "name": str(record["name"]), "role": role, "win": float(record["win"]),
             "damage": float(challenges.get("damagePerMinute", 0) or 0),
-            "gold": float(participant.get("goldEarned", 0) or 0) / minutes,
+            "damage_share": float(challenges.get("teamDamagePercentage", 0) or 0),
+            "damage_efficiency": float(participant.get("totalDamageDealtToChampions", 0) or 0) / max(1, gold),
+            "gold": gold / minutes,
+            "gold_15": float(record["diff"][15]["gold"]),
+            "xp_15": float(record["diff"][15]["xp"]),
             "kp": float(challenges.get("killParticipation", 0) or 0),
+            "takedowns": float(record["timeline_takedowns"]),
             "vision": float(participant.get("visionScore", 0) or 0) / minutes,
-            "utility": (
-                float(challenges.get("effectiveHealAndShielding", 0) or 0) / minutes
-                + 35 * float(challenges.get("saveAllyFromDeath", 0) or 0)
-                + 3 * float(challenges.get("enemyChampionImmobilizations", 0) or 0)
-            ),
-            "objectives": objectives + float(record["converted_takedowns"]) * 0.35,
+            "vision_actions": (
+                float(participant.get("wardsPlaced", 0) or 0)
+                + 1.5 * float(participant.get("wardsKilled", 0) or 0)
+                + 2 * float(participant.get("visionWardsBoughtInGame", 0) or 0)
+            ) / minutes,
+            "heal_shield": float(challenges.get("effectiveHealAndShielding", 0) or 0) / minutes,
+            "saves": float(challenges.get("saveAllyFromDeath", 0) or 0),
+            "cc": float(challenges.get("enemyChampionImmobilizations", 0) or 0),
+            "objective_damage": float(participant.get("damageDealtToObjectives", 0) or 0) / minutes,
+            "objective_events": objective_events,
+            "conversion": float(record["converted_takedowns"]) / max(1, int(record["timeline_takedowns"])),
             "survival": -float(participant.get("deaths", 0) or 0),
         })
+    metrics = tuple(key for key in games[0] if key not in {"name", "role", "win"}) if games else ()
+    distributions = {
+        (role, metric): sorted(float(game[metric]) for game in games if game["role"] == role)
+        for role in VALID_ROLES for metric in metrics
+    }
+    def percentile(role: str, metric: str, value: float) -> float:
+        ordered = distributions[(role, metric)]
+        if not ordered:
+            return .5
+        return (bisect_left(ordered, value) + bisect_right(ordered, value)) / (2 * len(ordered))
 
-    aggregates: dict[tuple[str, str], dict[str, float]] = {}
-    for key, rows in metric_rows.items():
-        aggregates[key] = {metric: sum(row[metric] for row in rows) / len(rows) for metric in rows[0]}
-        aggregates[key]["games"] = float(len(rows))
-
-    role_keys: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for key in aggregates:
-        role_keys[key[1]].append(key)
-
-    percentiles: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
-    scored_metrics = ("win", "damage", "gold", "kp", "vision", "utility", "objectives", "survival")
-    for role, keys in role_keys.items():
-        for metric in scored_metrics:
-            ordered = sorted(float(aggregates[key][metric]) for key in keys)
-            for key in keys:
-                value = float(aggregates[key][metric])
-                below = sum(candidate < value for candidate in ordered)
-                equal = sum(candidate == value for candidate in ordered)
-                percentiles[key][metric] = (below + 0.5 * equal) / max(1, len(ordered))
-
-    # These weights express what valuable performance looks like in each role.
-    role_weights = {
-        "TOP":     {"win": .14, "damage": .22, "gold": .18, "kp": .10, "vision": .06, "utility": .08, "objectives": .12, "survival": .10},
-        "JUNGLE":  {"win": .12, "damage": .13, "gold": .12, "kp": .16, "vision": .08, "utility": .06, "objectives": .23, "survival": .10},
-        "MID":     {"win": .13, "damage": .23, "gold": .17, "kp": .14, "vision": .06, "utility": .07, "objectives": .10, "survival": .10},
-        "BOT":     {"win": .13, "damage": .27, "gold": .21, "kp": .12, "vision": .04, "utility": .03, "objectives": .10, "survival": .10},
-        "SUPP":    {"win": .10, "damage": .05, "gold": .03, "kp": .16, "vision": .22, "utility": .23, "objectives": .11, "survival": .10},
+    dimension_weights = {
+        "TOP":    {"combat_score":.25,"economy_score":.20,"teamplay_score":.15,"vision_impact_score":.05,"utility_score":.10,"objective_score":.20},
+        "JUNGLE": {"combat_score":.15,"economy_score":.12,"teamplay_score":.18,"vision_impact_score":.08,"utility_score":.07,"objective_score":.35},
+        "MID":    {"combat_score":.24,"economy_score":.19,"teamplay_score":.17,"vision_impact_score":.06,"utility_score":.09,"objective_score":.20},
+        "BOT":    {"combat_score":.30,"economy_score":.23,"teamplay_score":.15,"vision_impact_score":.04,"utility_score":.03,"objective_score":.20},
+        "SUPP":   {"combat_score":.07,"economy_score":.03,"teamplay_score":.22,"vision_impact_score":.25,"utility_score":.25,"objective_score":.13},
     }
     by_player: dict[str, list[dict[str, float]]] = defaultdict(list)
-    for key, raw in aggregates.items():
-        name, role = key
-        pct = percentiles[key]
-        weights = role_weights[role]
+    for game in games:
+        role = str(game["role"])
+        pct = {metric: percentile(role, metric, float(game[metric])) for metric in metrics}
         dimensions = {
-            "combat_score": .72 * pct["damage"] + .28 * pct["survival"],
-            "economy_score": pct["gold"],
-            "teamplay_score": .72 * pct["kp"] + .28 * pct["win"],
-            "vision_impact_score": pct["vision"],
-            "utility_score": pct["utility"],
-            "objective_score": pct["objectives"],
+            "combat_score": .40*pct["damage"] + .25*pct["damage_share"] + .15*pct["damage_efficiency"] + .20*pct["survival"],
+            "economy_score": .50*pct["gold"] + .30*pct["gold_15"] + .20*pct["xp_15"],
+            "teamplay_score": .72*pct["kp"] + .28*pct["takedowns"],
+            "vision_impact_score": .62*pct["vision"] + .38*pct["vision_actions"],
+            "utility_score": .45*pct["heal_shield"] + .25*pct["saves"] + .30*pct["cc"],
+            "objective_score": .50*pct["objective_damage"] + .30*pct["objective_events"] + .20*pct["conversion"],
         }
-        mvp = sum(weights[metric] * pct[metric] for metric in weights)
-        by_player[name].append({**dimensions, "mvp_score": mvp, "games": raw["games"]})
+        # Only five percent comes directly from winning; the rest describes how
+        # the player contributed, avoiding a disguised second win-rate table.
+        impact = .05 * float(game["win"]) + sum(
+            dimension_weights[role][metric] * value for metric, value in dimensions.items()
+        )
+        by_player[str(game["name"])].append({**dimensions, "mvp_score": impact})
 
     output = {}
+    score_keys = ("combat_score", "economy_score", "teamplay_score", "vision_impact_score", "utility_score", "objective_score", "mvp_score")
     for name, rows in by_player.items():
-        games = sum(row["games"] for row in rows)
-        output[name] = {
-            metric: sum(row[metric] * row["games"] for row in rows) / games
-            for metric in (*["combat_score", "economy_score", "teamplay_score", "vision_impact_score", "utility_score", "objective_score"], "mvp_score")
-        }
-        output[name]["games"] = games
+        output[name] = {key: sum(row[key] for row in rows) / len(rows) for key in score_keys}
+        output[name]["games"] = float(len(rows))
     return output
 
 
