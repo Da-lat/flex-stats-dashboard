@@ -385,7 +385,12 @@ def render_with_qualification_thresholds() -> None:
                 f'<span class="champion-volume-track"><i style="width:{volume:.1f}%"></i></span>'
                 f'<b>{games}g</b></div>'
             )
-        return f'<div class="compact-champion-grid horizontal-chart">{"".join(items)}</div>'
+        rows_per_column = max(1, (len(items) + 2) // 3)
+        columns = [
+            f'<div class="champion-pool-column" style="display:grid;gap:5px;align-content:start">{"".join(items[start:start + rows_per_column])}</div>'
+            for start in range(0, len(items), rows_per_column)
+        ]
+        return f'<div class="compact-champion-grid horizontal-chart">{"".join(columns)}</div>'
 
     def vertical_champion_pool(_player, rows):
         max_games = max((int(row["games"]) for row in rows), default=1)
@@ -423,6 +428,18 @@ def main() -> None:
     rendered = rendered.replace(
         "Browse one player at a time. Unique-pick rate is unique champions divided by games, so champion pool depth is not just raw volume.",
         "Browse one player at a time. Switch between compact horizontal and vertical icon charts; longer bars mean more games.",
+    )
+    rendered = rendered.replace(
+        'class="orientation-button active" data-pool-orientation="horizontal"',
+        'class="orientation-button" data-pool-orientation="horizontal"',
+    )
+    rendered = rendered.replace(
+        'class="orientation-button" data-pool-orientation="vertical"',
+        'class="orientation-button active" data-pool-orientation="vertical"',
+    )
+    rendered = rendered.replace(
+        "player-pool-grid pool-orientation-horizontal",
+        "player-pool-grid pool-orientation-vertical",
     )
     rendered = re.sub(r'\s*<div class="header-actions"[^>]*>.*?</div>', "", rendered, count=1, flags=re.DOTALL)
     rendered = re.sub(r'\s*<a href="#match-history">Matches</a>', "", rendered, count=1)
