@@ -226,6 +226,9 @@ def tracked_match_log() -> list[dict[str, object]]:
                     "role": display_role(p),
                     "damage": int(p.get("totalDamageDealtToChampions", 0) or 0),
                     "vision": int(p.get("visionScore", 0) or 0),
+                    "vision_wards_bought": int(p.get("visionWardsBoughtInGame", 0) or 0),
+                    "wards_killed": int(p.get("wardsKilled", 0) or 0),
+                    "wards_placed": int(p.get("wardsPlaced", 0) or 0),
                     "max_cs_advantage": p.get("challenges", {}).get("maxCsAdvantageOnLaneOpponent"),
                     "kill_participation": p.get("challenges", {}).get("killParticipation"),
                     "lane_advantage": p.get("challenges", {}).get("laningPhaseGoldExpAdvantage"),
@@ -448,6 +451,66 @@ def experimental_ping_chart() -> str:
       <section class="table-panel"><div class="section-heading"><h3>Communication heatmap</h3><small>{len(player_stats)} tracked players · {len(relevant_ping_types)} useful ping types{omitted_note}</small></div><div class="table-wrap ping-table-wrap"><table class="sortable-table ping-table"><thead><tr><th>Player</th><th data-type="number">Games</th>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table></div></section>
     </section>
     <style>.ping-table-wrap{{max-height:720px;overflow:auto}}.ping-table{{min-width:1350px}}.ping-table th{{white-space:normal;min-width:88px;line-height:1.15}}.ping-table th:first-child{{min-width:120px}}.ping-player{{position:sticky;left:0;z-index:1;background:#111b27}}.ping-heat-cell{{text-align:center;font-weight:800;font-variant-numeric:tabular-nums}}.ping-total-heading,.ping-total-cell{{border-left:2px solid #6686aa!important}}.ping-total-cell{{font-size:1.02rem}}</style>
+    """
+
+
+def experimental_vision_chart() -> str:
+    metrics = {
+        "vision": "Vision Score",
+        "vision_wards_bought": "Control Wards Bought",
+        "wards_killed": "Wards Killed",
+        "wards_placed": "Wards Placed",
+    }
+    player_stats: dict[str, dict[str, float]] = {}
+    for match in tracked_match_log():
+        for participant in match["participant_stats"]:
+            name = str(participant["name"])
+            record = player_stats.setdefault(
+                name,
+                {"games": 0, **{key: 0.0 for key in metrics}},
+            )
+            record["games"] += 1
+            for key in metrics:
+                record[key] += float(participant[key])
+
+    averages = {
+        name: {
+            key: record[key] / record["games"] if record["games"] else 0.0
+            for key in metrics
+        }
+        for name, record in player_stats.items()
+    }
+    column_max = {
+        key: max((row[key] for row in averages.values()), default=0.0)
+        for key in metrics
+    }
+    headers = "".join(
+        f'<th data-type="number" title="Average {escape(label)} per eligible game">{escape(label)}</th>'
+        for label in metrics.values()
+    )
+    rows = []
+    for name in sorted(player_stats, key=lambda player: (-averages[player]["vision"], player)):
+        cells = []
+        for key, label in metrics.items():
+            value = averages[name][key]
+            strength = value / column_max[key] if column_max[key] else 0.0
+            cells.append(
+                f'<td class="vision-average-cell" data-sort="{value:.6f}" '
+                f'style="background:rgba(89,197,139,{0.05 + 0.48 * strength:.3f})" '
+                f'title="{escape(label)}: {value:.2f} per game across {int(player_stats[name]["games"])} games">{value:.2f}</td>'
+            )
+        rows.append(
+            f'<tr><td><strong>{escape(name)}</strong></td>'
+            f'<td class="number-cell" data-sort="{int(player_stats[name]["games"])}">{int(player_stats[name]["games"])}</td>'
+            f'{"".join(cells)}</tr>'
+        )
+
+    return f"""
+    <section id="vision-averages" class="section vision-experiment">
+      <div class="section-title"><div><h2>Vision Control Averages</h2><p class="note">Per-game averages from eligible matches for tracked players only. Darker green indicates a higher value within that statistic.</p></div></div>
+      <section class="table-panel"><div class="section-heading"><h3>Vision and warding</h3><small>{len(player_stats)} tracked players</small></div><div class="table-wrap"><table class="sortable-table vision-average-table"><thead><tr><th>Player</th><th data-type="number">Games</th>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table></div></section>
+    </section>
+    <style>.vision-average-table{{min-width:760px}}.vision-average-cell{{text-align:center;font-weight:800;font-variant-numeric:tabular-nums}}</style>
     """
 
 
@@ -805,9 +868,25 @@ def main() -> None:
         upset_end = experimental.find("</section>", upset_start)
         if upset_end >= 0:
             experimental = experimental[:upset_start] + experimental[upset_end + len("</section>"):]
-    experimental = experimental.replace(
-        "</main>", experimental_ping_chart() + "</main>", 1
+    experimental_analytics = (
+        experimental_vision_chart().strip()
+        + "\n"
+        + experimental_ping_chart().strip()
+        + "\n"
     )
+    champion_cards_marker = '<section id="champion-ownership"'
+    if champion_cards_marker in experimental:
+        # Analytics stay above the very large champion-card gallery, leaving
+        # that gallery as the final page section regardless of future tables.
+        experimental = experimental.replace(
+            champion_cards_marker,
+            experimental_analytics + champion_cards_marker,
+            1,
+        )
+    else:
+        experimental = experimental.replace(
+            "</main>", experimental_analytics + "</main>", 1
+        )
     experimental_path.write_text(experimental, encoding="utf-8")
     for page_path in OUTPUT_DIRECTORY.glob("*.html"):
         page = page_path.read_text(encoding="utf-8")
