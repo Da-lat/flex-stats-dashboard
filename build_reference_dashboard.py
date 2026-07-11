@@ -527,6 +527,88 @@ def advanced_stat_awards() -> list[dict[str, object]]:
     return awards
 
 
+@lru_cache(maxsize=1)
+def role_normalized_player_scores() -> dict[str, dict[str, float]]:
+    """Score advanced Riot metrics against tracked peers playing the same role."""
+    metric_rows: dict[tuple[str, str], list[dict[str, float]]] = defaultdict(list)
+    for record in experimental_player_records():
+        role = str(record["role"])
+        if role not in VALID_ROLES:
+            continue
+        participant = record["participant"]
+        challenges = record["challenges"]
+        minutes = max(1.0, float(record["minutes"]))
+        objectives = sum(float(value) for value in record["objectives"].values())
+        metric_rows[(str(record["name"]), role)].append({
+            "win": float(record["win"]),
+            "damage": float(challenges.get("damagePerMinute", 0) or 0),
+            "gold": float(participant.get("goldEarned", 0) or 0) / minutes,
+            "kp": float(challenges.get("killParticipation", 0) or 0),
+            "vision": float(participant.get("visionScore", 0) or 0) / minutes,
+            "utility": (
+                float(challenges.get("effectiveHealAndShielding", 0) or 0) / minutes
+                + 35 * float(challenges.get("saveAllyFromDeath", 0) or 0)
+                + 3 * float(challenges.get("enemyChampionImmobilizations", 0) or 0)
+            ),
+            "objectives": objectives + float(record["converted_takedowns"]) * 0.35,
+            "survival": -float(participant.get("deaths", 0) or 0),
+        })
+
+    aggregates: dict[tuple[str, str], dict[str, float]] = {}
+    for key, rows in metric_rows.items():
+        aggregates[key] = {metric: sum(row[metric] for row in rows) / len(rows) for metric in rows[0]}
+        aggregates[key]["games"] = float(len(rows))
+
+    role_keys: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for key in aggregates:
+        role_keys[key[1]].append(key)
+
+    percentiles: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
+    scored_metrics = ("win", "damage", "gold", "kp", "vision", "utility", "objectives", "survival")
+    for role, keys in role_keys.items():
+        for metric in scored_metrics:
+            ordered = sorted(float(aggregates[key][metric]) for key in keys)
+            for key in keys:
+                value = float(aggregates[key][metric])
+                below = sum(candidate < value for candidate in ordered)
+                equal = sum(candidate == value for candidate in ordered)
+                percentiles[key][metric] = (below + 0.5 * equal) / max(1, len(ordered))
+
+    # These weights express what valuable performance looks like in each role.
+    role_weights = {
+        "TOP":     {"win": .14, "damage": .22, "gold": .18, "kp": .10, "vision": .06, "utility": .08, "objectives": .12, "survival": .10},
+        "JUNGLE":  {"win": .12, "damage": .13, "gold": .12, "kp": .16, "vision": .08, "utility": .06, "objectives": .23, "survival": .10},
+        "MID":     {"win": .13, "damage": .23, "gold": .17, "kp": .14, "vision": .06, "utility": .07, "objectives": .10, "survival": .10},
+        "BOT":     {"win": .13, "damage": .27, "gold": .21, "kp": .12, "vision": .04, "utility": .03, "objectives": .10, "survival": .10},
+        "SUPP":    {"win": .10, "damage": .05, "gold": .03, "kp": .16, "vision": .22, "utility": .23, "objectives": .11, "survival": .10},
+    }
+    by_player: dict[str, list[dict[str, float]]] = defaultdict(list)
+    for key, raw in aggregates.items():
+        name, role = key
+        pct = percentiles[key]
+        weights = role_weights[role]
+        dimensions = {
+            "combat_score": .72 * pct["damage"] + .28 * pct["survival"],
+            "economy_score": pct["gold"],
+            "teamplay_score": .72 * pct["kp"] + .28 * pct["win"],
+            "vision_impact_score": pct["vision"],
+            "utility_score": pct["utility"],
+            "objective_score": pct["objectives"],
+        }
+        mvp = sum(weights[metric] * pct[metric] for metric in weights)
+        by_player[name].append({**dimensions, "mvp_score": mvp, "games": raw["games"]})
+
+    output = {}
+    for name, rows in by_player.items():
+        games = sum(row["games"] for row in rows)
+        output[name] = {
+            metric: sum(row[metric] * row["games"] for row in rows) / games
+            for metric in (*["combat_score", "economy_score", "teamplay_score", "vision_impact_score", "utility_score", "objective_score"], "mvp_score")
+        }
+        output[name]["games"] = games
+    return output
+
+
 def experimental_ping_chart() -> str:
     player_stats: dict[str, dict[str, object]] = {}
     for match in tracked_match_log():
@@ -1463,7 +1545,7 @@ def build_showcase_share_page(showcase_html: str) -> str:
         r'<article class="showcase-stat">\s*<span>Games</span>.*?<strong>(.*?)</strong>.*?'
         r'<article class="showcase-stat">\s*<span>Winrate</span>.*?<strong>(.*?)</strong>.*?'
         r'<article class="showcase-stat">\s*<span>KDA</span>.*?<strong>(.*?)</strong>.*?'
-        r'<article class="showcase-stat">\s*<span>MVP Score</span>.*?<strong>(.*?)</strong>.*?'
+        r'<article class="showcase-stat">\s*<span>(?:MVP Score|Role-adjusted MVP)</span>.*?<strong>(.*?)</strong>.*?'
         r'<article class="showcase-feature">\s*<img[^>]*>\s*<div>.*?<strong>(.*?)</strong>\s*<small>(.*?)</small>',
         re.DOTALL,
     )
@@ -1495,7 +1577,7 @@ def build_showcase_share_page(showcase_html: str) -> str:
 .hint{{max-width:860px;margin:14px auto;color:#91abc3;font-size:.84rem;text-align:center}} @media(max-width:650px){{body{{padding:12px}}.card{{padding:28px 20px;min-height:560px}}.stats{{grid-template-columns:repeat(2,1fr)}}.champ-art{{width:270px;height:270px}}}} @media print{{body{{padding:0;background:#070c12;-webkit-print-color-adjust:exact;print-color-adjust:exact}}.controls,.hint{{display:none}}.card{{max-width:none;width:100%;height:100vh;border:0;border-radius:0;box-shadow:none}}}}
 </style></head><body>
 <div class="controls"><a href="index_showcases.html">← Full showcases</a><select id="player-select">{options}</select><button class="primary" id="share-button">Share card</button><button id="copy-button">Copy link</button><button onclick="window.print()">Save as PDF</button></div>
-<main class="card" id="card"><div class="brand">LEAGUE FLEX</div><img class="champ-art" id="champ-art" alt=""><div class="eyebrow" id="rank"></div><h1 id="name"></h1><p class="summary" id="summary"></p><div class="stats"><div class="stat"><span>Games</span><b id="games"></b></div><div class="stat"><span>Win rate</span><b id="winrate"></b></div><div class="stat"><span>KDA</span><b id="kda"></b></div><div class="stat"><span>MVP score</span><b id="mvp"></b></div></div><div class="signature"><img id="champ-icon" alt=""><div><span>Signature champion</span><strong id="champion"></strong><small id="champion-detail"></small></div></div></main>
+<main class="card" id="card"><div class="brand">LEAGUE FLEX</div><img class="champ-art" id="champ-art" alt=""><div class="eyebrow" id="rank"></div><h1 id="name"></h1><p class="summary" id="summary"></p><div class="stats"><div class="stat"><span>Games</span><b id="games"></b></div><div class="stat"><span>Win rate</span><b id="winrate"></b></div><div class="stat"><span>KDA</span><b id="kda"></b></div><div class="stat"><span>Role-adjusted MVP</span><b id="mvp"></b></div></div><div class="signature"><img id="champ-icon" alt=""><div><span>Signature champion</span><strong id="champion"></strong><small id="champion-detail"></small></div></div></main>
 <p class="hint">This page has its own player-specific URL. Share it directly or use “Save as PDF” for a compact keepsake.</p>
 <script>const players={data};const select=document.getElementById('player-select');const byId=Object.fromEntries(players.map(p=>[p.id,p]));
 function show(id,write=true){{const p=byId[id]||players[0];if(!p)return;select.value=p.id;for(const key of ['rank','name','summary','games','winrate','kda','mvp','champion'])document.getElementById(key).textContent=p[key];document.getElementById('champion-detail').textContent=p.champion_detail;for(const id of ['champ-art','champ-icon'])document.getElementById(id).src=p.icon;if(write)history.replaceState(null,'','?player='+encodeURIComponent(p.id));document.title=p.name+' — League Flex Player Card'}}
@@ -1507,7 +1589,15 @@ def enhance_showcases(showcase_html: str) -> str:
     showcase_html = showcase_html.replace("LoL Player Showcases", "League Flex Showcases")
     showcase_html = showcase_html.replace(
         "Full-page player recaps, signature picks, personal awards, and match-history arcs from the same Ranked Flex dataset.",
-        "Your Flex careers turned into player stories: signature picks, personal records, form arcs, and friendly rivalries.",
+        "Your Flex careers turned into player stories: signature picks, personal records, form arcs, and friendly rivalries.</p><p class=\"showcase-model-note\"><b>New role-relative model:</b> damage/min, gold/min, teamplay, vision, utility and objectives are compared with tracked players in the same role.",
+    )
+    showcase_html = showcase_html.replace(">Player Fingerprint<", ">Role Impact Profile<")
+    showcase_html = showcase_html.replace(">MVP Score<", ">Role-adjusted MVP<")
+    showcase_html = showcase_html.replace(
+        'renderCompareStat("MVP Score",', 'renderCompareStat("Role-adjusted MVP",'
+    ).replace(
+        '"Overall board rating from the current MVP formula."',
+        '"Role-relative rating across combat, economy, teamplay, vision, utility, objectives, survival and results."',
     )
     fun_controls = ('<div class="showcase-fun-controls"><button type="button" data-showcase-prev>←</button>'
                     '<button type="button" class="random-spotlight" data-showcase-random>✦ Random spotlight</button>'
@@ -1517,7 +1607,7 @@ def enhance_showcases(showcase_html: str) -> str:
     showcase_html = showcase_html.replace(
         "</head>",
         """<style id="showcase-polish">
-body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transparent 28%),radial-gradient(circle at 88% 38%,#132d27 0,transparent 30%),#080d13}.showcase-toolbar{backdrop-filter:blur(16px);box-shadow:0 18px 50px #0005}.showcase-fun-controls{display:flex;gap:6px;align-items:center}.showcase-fun-controls button,.showcase-share-button{padding:11px 14px;border:1px solid #354b61;border-radius:9px;color:#eafff7;background:#142131;text-decoration:none;font-weight:900;white-space:nowrap;cursor:pointer}.showcase-fun-controls .random-spotlight,.showcase-share-button{border-color:#48d7a0;background:linear-gradient(135deg,#12684f,#205f94)}.showcase-fun-controls button:hover,.showcase-share-button:hover{transform:translateY(-1px);filter:brightness(1.15)}.showcase-hero{position:relative;border-color:#38536c;box-shadow:0 28px 70px #0007}.showcase-title,.showcase-fingerprint,.showcase-hero-grid{position:relative;z-index:1}.showcase-title h2{text-shadow:0 8px 30px #000}.showcase-kicker{letter-spacing:.12em}.showcase-dna{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.showcase-dna-chip{padding:7px 10px;border:1px solid #38516a;border-radius:999px;background:#0b1622dc;color:#c7dff5;font-size:.78rem;font-weight:800}.showcase-dna-chip b{color:#68e1ad}.showcase-dna-chip.gold{border-color:#8d7437;background:#251f11dd}.showcase-dna-chip.gold b{color:#ffd872}.showcase-roster-rail{display:flex;gap:7px;overflow-x:auto;padding:4px 1px 14px;margin:0 0 14px;scrollbar-width:thin}.showcase-roster-pill{border:1px solid #293b4e;background:#101a26;color:#9ebbd4;border-radius:999px;padding:7px 11px;font-weight:800;cursor:pointer;white-space:nowrap}.showcase-roster-pill.active{color:#07130f;background:#58dba6;border-color:#75ebbc}.player-showcase.active{animation:showcase-in .35s ease-out}@keyframes showcase-in{from{opacity:.3;transform:translateY(8px)}to{opacity:1;transform:none}}.spotlight-spark{position:fixed;z-index:9999;width:8px;height:8px;border-radius:2px;pointer-events:none;animation:spark-fall .9s ease-out forwards}@keyframes spark-fall{to{transform:translate(var(--dx),var(--dy)) rotate(300deg);opacity:0}}@media(max-width:900px){.showcase-toolbar{align-items:stretch}.showcase-fun-controls{order:3}.showcase-count{display:none}}@media(max-width:700px){.showcase-share-button{width:100%;text-align:center}.showcase-fun-controls{width:100%}.random-spotlight{flex:1}}
+body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transparent 28%),radial-gradient(circle at 88% 38%,#132d27 0,transparent 30%),#080d13}.showcase-model-note{display:inline-block;margin-top:10px!important;padding:7px 11px;border:1px solid #35536a;border-radius:8px;background:#101c28;color:#b8d1e7!important;font-size:.82rem!important}.showcase-model-note b{color:#62dcaa}.showcase-toolbar{backdrop-filter:blur(16px);box-shadow:0 18px 50px #0005}.showcase-fun-controls{display:flex;gap:6px;align-items:center}.showcase-fun-controls button,.showcase-share-button{padding:11px 14px;border:1px solid #354b61;border-radius:9px;color:#eafff7;background:#142131;text-decoration:none;font-weight:900;white-space:nowrap;cursor:pointer}.showcase-fun-controls .random-spotlight,.showcase-share-button{border-color:#48d7a0;background:linear-gradient(135deg,#12684f,#205f94)}.showcase-fun-controls button:hover,.showcase-share-button:hover{transform:translateY(-1px);filter:brightness(1.15)}.showcase-hero{position:relative;border-color:#38536c;box-shadow:0 28px 70px #0007}.showcase-title,.showcase-fingerprint,.showcase-hero-grid{position:relative;z-index:1}.showcase-title h2{text-shadow:0 8px 30px #000}.showcase-kicker{letter-spacing:.12em}.showcase-dna{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.showcase-dna-chip{padding:7px 10px;border:1px solid #38516a;border-radius:999px;background:#0b1622dc;color:#c7dff5;font-size:.78rem;font-weight:800}.showcase-dna-chip b{color:#68e1ad}.showcase-dna-chip.gold{border-color:#8d7437;background:#251f11dd}.showcase-dna-chip.gold b{color:#ffd872}.showcase-roster-rail{display:flex;gap:7px;overflow-x:auto;padding:4px 1px 14px;margin:0 0 14px;scrollbar-width:thin}.showcase-roster-pill{border:1px solid #293b4e;background:#101a26;color:#9ebbd4;border-radius:999px;padding:7px 11px;font-weight:800;cursor:pointer;white-space:nowrap}.showcase-roster-pill.active{color:#07130f;background:#58dba6;border-color:#75ebbc}.player-showcase.active{animation:showcase-in .35s ease-out}@keyframes showcase-in{from{opacity:.3;transform:translateY(8px)}to{opacity:1;transform:none}}.spotlight-spark{position:fixed;z-index:9999;width:8px;height:8px;border-radius:2px;pointer-events:none;animation:spark-fall .9s ease-out forwards}@keyframes spark-fall{to{transform:translate(var(--dx),var(--dy)) rotate(300deg);opacity:0}}@media(max-width:900px){.showcase-toolbar{align-items:stretch}.showcase-fun-controls{order:3}.showcase-count{display:none}}@media(max-width:700px){.showcase-share-button{width:100%;text-align:center}.showcase-fun-controls{width:100%}.random-spotlight{flex:1}}
 </style></head>""",
         1,
     )
@@ -1640,6 +1730,63 @@ def render_with_qualification_thresholds():
     renderer.build_awards = build_roster_awards
     renderer.heat_color = winrate_color
     renderer.heat_text_color = winrate_text_color
+    advanced_scores = role_normalized_player_scores()
+    renderer.FINGERPRINT_METRICS = (
+        ("Combat", "combat_score"),
+        ("Economy", "economy_score"),
+        ("Teamplay", "teamplay_score"),
+        ("Vision", "vision_impact_score"),
+        ("Utility", "utility_score"),
+        ("Objectives", "objective_score"),
+    )
+
+    def advanced_mvp_rows(player_rows):
+        rows = []
+        for player in renderer.qualify(
+            renderer.without_spotlight_excluded_players(player_rows), renderer.MIN_PLAYER_GAMES
+        ):
+            name = str(player.get("name", ""))
+            metrics = advanced_scores.get(name, {})
+            row = dict(player)
+            row.update(
+                mvp_score=100 * float(metrics.get("mvp_score", 0.5)),
+                adjusted_winrate=float(player.get("winrate", 0)),
+                reliability=min(1.0, int(player.get("games", 0)) / 20),
+                net_win_score=float(metrics.get("teamplay_score", 0.5)),
+                kda_score=float(metrics.get("combat_score", 0.5)),
+                kill_participation_score=float(metrics.get("teamplay_score", 0.5)),
+                champion_pool_score=float(metrics.get("utility_score", 0.5)),
+                games_score=min(1.0, int(player.get("games", 0)) / 20),
+                **{key: float(value) for key, value in metrics.items() if key.endswith("_score") and key != "mvp_score"},
+            )
+            rows.append(row)
+        rows.sort(key=lambda row: (-float(row["mvp_score"]), -int(row["games"]), str(row["name"])))
+        for rank, row in enumerate(rows, start=1):
+            row["mvp_rank"] = rank
+        return rows
+
+    def advanced_fingerprint_rows(_appearances, player_rows, _combo_rows):
+        rows = []
+        for player in renderer.without_spotlight_excluded_players(player_rows):
+            name = str(player.get("name", ""))
+            metrics = advanced_scores.get(name, {})
+            dimensions = {
+                key: float(metrics.get(key, 0.5))
+                for _label, key in renderer.FINGERPRINT_METRICS
+            }
+            strongest = max(renderer.FINGERPRINT_METRICS, key=lambda item: dimensions[item[1]])[0]
+            rows.append({
+                "name": name,
+                "games": int(player.get("games", 0)),
+                "fingerprint_score": sum(dimensions.values()) / len(dimensions),
+                "comfort_label": f"Role-normalized strength: {strongest}",
+                "search_text": name,
+                **dimensions,
+            })
+        return sorted(rows, key=lambda row: (-float(row["fingerprint_score"]), str(row["name"])))
+
+    renderer.mvp_score_rows = advanced_mvp_rows
+    renderer.player_fingerprint_rows = advanced_fingerprint_rows
     def horizontal_champion_pool(_player, rows):
         max_games = max((int(row["games"]) for row in rows), default=1)
         items = []
