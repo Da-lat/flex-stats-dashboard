@@ -1696,7 +1696,12 @@ def enhance_showcases(showcase_html: str) -> str:
     )
     showcase_html = showcase_html.replace(
         "Full-page player recaps, signature picks, personal awards, and match-history arcs from the same Ranked Flex dataset.",
-        "Your Flex careers turned into player stories: signature picks, personal records, form arcs, and friendly rivalries.</p><p class=\"showcase-model-note\"><b>New role-relative model:</b> damage/min, gold/min, teamplay, vision, utility and objectives are compared with tracked players in the same role.",
+        "",
+    )
+    showcase_html = re.sub(
+        r'<label>\s*<span>Player Showcase</span>\s*(<select data-showcase-select.*?</select>)\s*</label>',
+        lambda match: match.group(1).replace("<select ", "<select hidden ", 1),
+        showcase_html, count=1, flags=re.DOTALL,
     )
     showcase_html = showcase_html.replace(">Player Fingerprint<", ">Role Impact Profile<")
     showcase_html = re.sub(
