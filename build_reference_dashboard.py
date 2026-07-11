@@ -1326,6 +1326,13 @@ def main() -> None:
     experimental_path = OUTPUT_DIRECTORY / "index_experimental.html"
     experimental = experimental_path.read_text(encoding="utf-8")
     experimental = re.sub(
+        r'\s*<section class="section experimental-hero">.*?</section>',
+        "",
+        experimental,
+        count=1,
+        flags=re.DOTALL,
+    )
+    experimental = re.sub(
         r'<article class="lab-award-card(?:(?!</article>).)*?Best Pocket Pick(?:(?!</article>).)*?</article>',
         "",
         experimental,
