@@ -6,12 +6,13 @@ import json
 import re
 import sqlite3
 import sys
+from collections import Counter
 from datetime import datetime, timezone
+from functools import lru_cache
 from html import escape
 from itertools import combinations
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from collections import Counter
 
 
 DATABASE = Path("data/riot_cache.sqlite3")
@@ -164,8 +165,9 @@ def export_match_history() -> int:
     return len(matches)
 
 
-def tracked_match_log() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
-    """Return roster-only match rows for the HTML log and player profiles."""
+@lru_cache(maxsize=1)
+def tracked_match_log() -> list[dict[str, object]]:
+    """Return roster-only match rows, cached for all generated sections."""
     with sqlite3.connect(DATABASE) as con:
         tracked = dict(con.execute("SELECT puuid, display_name FROM tracked_players WHERE puuid IS NOT NULL"))
         payloads = [json.loads(row[0]) for row in con.execute("SELECT payload FROM riot_payloads WHERE kind='match'")]
@@ -173,7 +175,7 @@ def tracked_match_log() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
         str(match.get("checksum", "")): index
         for index, match in enumerate(json.loads(EXPORTED_HISTORY.read_text(encoding="utf-8")), start=1)
     }
-    rows, by_player = [], {name: [] for name in set(tracked.values())}
+    rows = []
     for payload in payloads:
         info = payload.get("info", {})
         if not is_meaningful_match(info):
@@ -204,26 +206,12 @@ def tracked_match_log() -> tuple[list[dict[str, object]], dict[str, list[str]]]:
             "result": "Win" if roster_team[0].get("win") else "Loss",
             "minutes": round(info.get("gameDuration", 0) / 60, 1),
         })
-        for name in names:
-            by_player.setdefault(name, []).append(match_id)
     rows.sort(key=lambda row: int(row["sort"]), reverse=True)
-    for ids in by_player.values():
-        ids.sort(reverse=True)
-    return rows, by_player
+    return rows
 
 
-def roster_only_sections() -> tuple[str, str]:
-    rows, by_player = tracked_match_log()
-    profile_rows = "".join(
-        f"<tr><td>{escape(name)}</td><td>{len(ids)}</td><td><details><summary>Show match IDs</summary><div class=\"match-id-list\">{escape(' · '.join(ids))}</div></details></td></tr>"
-        for name, ids in sorted(by_player.items())
-    )
-    profiles = f"""
-    <section class=\"table-panel roster-match-ids\">
-      <div class=\"section-heading\"><h3>Player Match IDs</h3><small>Eligible flex matches involving at least two tracked players</small></div>
-      <div class=\"table-wrap\"><table><thead><tr><th>Player</th><th>Eligible games</th><th>Match IDs</th></tr></thead><tbody>{profile_rows}</tbody></table></div>
-    </section>
-    """
+def roster_matches_section() -> str:
+    rows = tracked_match_log()
     def champion_pairs_html(champions: list[str]) -> str:
         pairs = []
         for pair in champions:
@@ -242,11 +230,11 @@ def roster_only_sections() -> tuple[str, str]:
     </section>
     <script>document.getElementById('match-db-search')?.addEventListener('input', event => {{ const query = event.target.value.toLowerCase(); document.querySelectorAll('#matches tbody tr').forEach(row => row.hidden = !row.dataset.matchSearch.toLowerCase().includes(query)); }});</script>
     """
-    return profiles, matches
+    return matches
 
 
 def tracked_combo_section() -> str:
-    rows, _by_player = tracked_match_log()
+    rows = tracked_match_log()
     minimum_games = {2: 20, 3: 15, 4: 15, 5: 5}
     panels = []
     for size in range(2, 6):
@@ -304,7 +292,7 @@ def tracked_combo_section() -> str:
 
 
 def tracked_champion_history_section() -> str:
-    rows, _by_player = tracked_match_log()
+    rows = tracked_match_log()
     champions: dict[str, dict[str, object]] = {}
     for row in rows:
         for pair in row["champions"]:
@@ -449,8 +437,8 @@ def main() -> None:
         flags=re.DOTALL,
     )
     rendered = re.sub(r"Anonymous opposition (TOP|JUNGLE|MID|BOT|SUPP)", "", rendered)
-    _profiles, matches = roster_only_sections()
-    match_id_by_number = {int(row["number"]): str(row["id"]) for row in tracked_match_log()[0] if row["number"]}
+    matches = roster_matches_section()
+    match_id_by_number = {int(row["number"]): str(row["id"]) for row in tracked_match_log() if row["number"]}
     rendered = re.sub(
         r"Match (\d+)(?!\s*[·#])",
         lambda match: f"Match {match.group(1)} · {match_id_by_number.get(int(match.group(1)), 'Riot ID unavailable')}",
@@ -477,7 +465,7 @@ def main() -> None:
         r" &middot; Match \1 &middot; \2 &middot; \3",
         rendered,
     )
-    roster_count = len(tracked_match_log()[1])
+    roster_count = len(tracked_real_names())
     rendered = re.sub(
         r'(<span>Players</span>\s*<strong>)\d+(</strong>\s*<small>Unique real-name entries</small>)',
         rf'\g<1>{roster_count}\g<2>',
@@ -495,7 +483,7 @@ def main() -> None:
     rendered = rendered.replace("</main>", tracked_combos + champion_history + matches + "</main>", 1)
     rendered = rendered.replace(
         "</head>",
-        "<style>.roster-match-ids{margin:20px 0}.match-id-list{max-width:800px;padding:10px 0;color:#9fb9d1;line-height:1.7;word-break:break-all}.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}.champion-match-links{max-width:620px;padding:8px 0;line-height:1.8}.champion-match-links a{white-space:nowrap}.compact-champion-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:6px;padding:2px}.compact-champion-item{display:grid;grid-template-columns:30px minmax(0,1fr) auto auto;align-items:center;gap:7px;min-height:38px;padding:4px 8px 4px 5px;background:#172231;border:1px solid #2a394b;border-left:3px solid var(--wr-color);border-radius:7px}.compact-champion-item img{width:28px;height:28px;object-fit:cover;border-radius:5px}.compact-champion-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.compact-champion-item b{color:#a9bed2;font-size:.78rem}.compact-champion-item strong{color:var(--wr-color);font-size:.82rem;font-variant-numeric:tabular-nums}@media(max-width:700px){.compact-champion-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}.compact-champion-item{grid-template-columns:26px minmax(0,1fr) auto}.compact-champion-item img{width:24px;height:24px}.compact-champion-item b{display:none}}</style></head>",
+        "<style>.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}.champion-match-links{max-width:620px;padding:8px 0;line-height:1.8}.champion-match-links a{white-space:nowrap}.compact-champion-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:6px;padding:2px}.compact-champion-item{display:grid;grid-template-columns:30px minmax(0,1fr) auto auto;align-items:center;gap:7px;min-height:38px;padding:4px 8px 4px 5px;background:#172231;border:1px solid #2a394b;border-left:3px solid var(--wr-color);border-radius:7px}.compact-champion-item img{width:28px;height:28px;object-fit:cover;border-radius:5px}.compact-champion-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.compact-champion-item b{color:#a9bed2;font-size:.78rem}.compact-champion-item strong{color:var(--wr-color);font-size:.82rem;font-variant-numeric:tabular-nums}@media(max-width:700px){.compact-champion-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}.compact-champion-item{grid-template-columns:26px minmax(0,1fr) auto}.compact-champion-item img{width:24px;height:24px}.compact-champion-item b{display:none}}</style></head>",
         1,
     )
     index_path.write_text(rendered, encoding="utf-8")
