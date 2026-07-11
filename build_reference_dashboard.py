@@ -1568,6 +1568,8 @@ def build_showcase_share_page(showcase_html: str) -> str:
             "best_label": highlights.get("best_label", "-"),
             "best_value": highlights.get("best_value", "-"),
             "best_category": highlights.get("best_category", "-"),
+            "best_rank": highlights.get("best_rank", 0),
+            "rank_population": highlights.get("rank_population", 0),
         })
     data = json.dumps(players, ensure_ascii=False).replace("</", "<\\/")
     options = "".join(f'<option value="{escape(row["id"])}">{escape(row["name"])}</option>' for row in players)
@@ -1585,7 +1587,7 @@ def build_showcase_share_page(showcase_html: str) -> str:
 <main class="card" id="card"><div class="brand">LEAGUE FLEX</div><img class="champ-art" id="champ-art" alt=""><div class="eyebrow">PLAYER SHOWCASE</div><h1 id="name"></h1><p class="summary" id="summary"></p><div class="stats"><div class="stat"><span>Games</span><b id="games"></b></div><div class="stat"><span>Win rate</span><b id="winrate"></b></div><div class="stat"><span>KDA</span><b id="kda"></b></div></div><div class="signature"><img id="champ-icon" alt=""><div><span>Most played champion</span><strong id="champion"></strong><small id="champion-detail"></small></div><div><span>Top 3 champions</span><div class="share-top-picks" id="share-top-picks"></div></div><div class="share-best"><span id="share-best-category"></span><b id="share-best-label"></b><small id="share-best-value"></small></div></div></main>
 <p class="hint">This page has its own player-specific URL. Share it directly or use “Save as PDF” for a compact keepsake.</p>
 <script>const players={data};const select=document.getElementById('player-select');const byId=Object.fromEntries(players.map(p=>[p.id,p]));
-function show(id,write=true){{const p=byId[id]||players[0];if(!p)return;select.value=p.id;for(const key of ['name','summary','games','winrate','kda','champion'])document.getElementById(key).textContent=p[key];document.getElementById('champion-detail').textContent=p.champion_detail;document.getElementById('share-top-picks').innerHTML=p.top_champions.map(row=>`<span class="share-top-pick" title="${{row.name}}: ${{row.games}} games"><img src="${{row.icon}}" alt="${{row.name}}"><small>${{row.games}}g</small></span>`).join('');document.getElementById('share-best-category').textContent='Best '+p.best_category+' stat';document.getElementById('share-best-label').textContent=p.best_label;document.getElementById('share-best-value').textContent=p.best_value;for(const id of ['champ-art','champ-icon'])document.getElementById(id).src=p.icon;if(write)history.replaceState(null,'','?player='+encodeURIComponent(p.id));document.title=p.name+' — League Flex Player Card'}}
+function show(id,write=true){{const p=byId[id]||players[0];if(!p)return;select.value=p.id;for(const key of ['name','summary','games','winrate','kda','champion'])document.getElementById(key).textContent=p[key];document.getElementById('champion-detail').textContent=p.champion_detail;document.getElementById('share-top-picks').innerHTML=p.top_champions.map(row=>`<span class="share-top-pick" title="${{row.name}}: ${{row.games}} games"><img src="${{row.icon}}" alt="${{row.name}}"><small>${{row.games}}g</small></span>`).join('');document.getElementById('share-best-category').textContent='Best '+p.best_category+' stat';document.getElementById('share-best-label').textContent=p.best_label;document.getElementById('share-best-value').textContent='Rank #'+p.best_rank+' of '+p.rank_population+' · '+p.best_value;for(const id of ['champ-art','champ-icon'])document.getElementById(id).src=p.icon;if(write)history.replaceState(null,'','?player='+encodeURIComponent(p.id));document.title=p.name+' — League Flex Player Card'}}
 select.addEventListener('change',()=>show(select.value));document.getElementById('copy-button').addEventListener('click',async e=>{{await navigator.clipboard.writeText(location.href);e.target.textContent='Copied!';setTimeout(()=>e.target.textContent='Copy link',1400)}});document.getElementById('share-button').addEventListener('click',async()=>{{const p=byId[select.value];if(navigator.share)await navigator.share({{title:document.title,text:p.summary,url:location.href}});else document.getElementById('copy-button').click()}});show(new URLSearchParams(location.search).get('player'),false);</script></body></html>"""
 
 
@@ -1651,30 +1653,35 @@ def showcase_player_highlights() -> dict[str, dict[str, object]]:
         name: {key: sum(values) / len(values) for key, values in metrics.items() if values}
         for name, metrics in granular_rows.items()
     }
-    def metric_percentile(name: str, key: str) -> float:
-        value = granular_averages.get(name, {}).get(key, 0)
-        population = sorted(metrics.get(key, 0) for metrics in granular_averages.values())
-        return (bisect_left(population, value) + bisect_right(population, value)) / (2 * max(1, len(population)))
     def format_metric(value: float, kind: str) -> str:
         if kind == "percent": return f"{100 * value:.1f}% average"
         if kind == "signed": return f"{value:+,.0f} average"
         if kind == "decimal": return f"{value:.1f} per game"
         return f"{value:,.0f} average"
-    scores = role_normalized_player_scores()
     output = {}
     for name, champions in champion_rows.items():
         player_id = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
-        player_scores = scores.get(name, {})
-        strongest_key = max(score_labels, key=lambda key: float(player_scores.get(key, 0)))
-        granular_key, granular_label, granular_kind = max(
-            granular_candidates[strongest_key], key=lambda candidate: metric_percentile(name, candidate[0])
-        )
+        ranked_metrics = []
+        for category_key, candidates in granular_candidates.items():
+            for granular_key, granular_label, granular_kind in candidates:
+                population = [metrics.get(granular_key, 0) for metrics in granular_averages.values()]
+                if len(set(population)) < 2:
+                    continue
+                value = granular_averages.get(name, {}).get(granular_key, 0)
+                rank = 1 + sum(candidate > value for candidate in population)
+                mean = sum(population) / len(population)
+                spread = (sum((candidate - mean) ** 2 for candidate in population) / len(population)) ** 0.5
+                standout = (value - mean) / spread if spread else 0
+                ranked_metrics.append((rank, -standout, category_key, granular_key, granular_label, granular_kind))
+        best_rank, _standout, strongest_key, granular_key, granular_label, granular_kind = min(ranked_metrics)
         granular_value = granular_averages.get(name, {}).get(granular_key, 0)
         output[player_id] = {
             "champions": champions.most_common(3),
             "best_category": score_labels[strongest_key],
             "best_label": granular_label,
             "best_value": format_metric(granular_value, granular_kind),
+            "best_rank": best_rank,
+            "rank_population": len(granular_averages),
         }
     return output
 
@@ -1727,7 +1734,7 @@ def enhance_showcases(showcase_html: str) -> str:
             '<div class="showcase-extra-highlights">'
             f'<div><span>Top 3 champions</span><div class="showcase-top-picks">{champion_chips}</div></div>'
             f'<div class="showcase-best-stat"><span>Best {escape(str(highlight["best_category"]))} stat</span><b>{escape(str(highlight["best_label"]))}</b>'
-            f'<small>{escape(str(highlight["best_value"]))}</small></div></div>'
+            f'<small>Rank #{int(highlight["best_rank"])} of {int(highlight["rank_population"])} &middot; {escape(str(highlight["best_value"]))}</small></div></div>'
         )
         showcase_html = re.sub(
             rf'(<section class="player-showcase[^>]*data-showcase="{re.escape(player_id)}".*?<article class="showcase-feature">.*?<small>.*?</small>)(\s*</div>\s*</article>)',
@@ -1741,7 +1748,7 @@ def enhance_showcases(showcase_html: str) -> str:
     fun_controls = ('<div class="showcase-fun-controls"><button type="button" data-showcase-prev>←</button>'
                     '<button type="button" class="random-spotlight" data-showcase-random>✦ Random spotlight</button>'
                     '<button type="button" data-showcase-next>→</button></div>'
-                    '<a class="showcase-share-button" data-showcase-share href="showcase_share.html?v=3">Share player card ↗</a>')
+                    '<a class="showcase-share-button" data-showcase-share href="showcase_share.html?v=4">Share player card ↗</a>')
     showcase_html = showcase_html.replace('<div class="showcase-count">', fun_controls + '<div class="showcase-count">', 1)
     showcase_html = showcase_html.replace(
         "</head>",
@@ -1752,7 +1759,7 @@ body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transpa
     )
     showcase_html = showcase_html.replace(
         "if (showcaseSelect) showcaseSelect.value = target.dataset.showcase;",
-        "if (showcaseSelect) showcaseSelect.value = target.dataset.showcase; const share = document.querySelector('[data-showcase-share]'); if (share) share.href = `showcase_share.html?v=3&player=${encodeURIComponent(target.dataset.showcase)}`;",
+        "if (showcaseSelect) showcaseSelect.value = target.dataset.showcase; const share = document.querySelector('[data-showcase-share]'); if (share) share.href = `showcase_share.html?v=4&player=${encodeURIComponent(target.dataset.showcase)}`;",
         1,
     )
     showcase_html = showcase_html.replace("</body>", """<script id="showcase-fun-script">
