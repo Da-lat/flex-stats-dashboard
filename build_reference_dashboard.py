@@ -25,6 +25,12 @@ VALID_ROLES = {"TOP", "JUNGLE", "MID", "BOT", "SUPP"}
 MINIMUM_GAME_SECONDS = 10 * 60
 UK_TIMEZONE = ZoneInfo("Europe/London")
 DATA_DRAGON_VERSION = "16.13.1"
+COMMUNITY_DRAGON_ICON_IDS = {
+    "fiddlesticks": 9,
+    "yunara": 804,
+    "locke": 805,
+    "zaahen": 904,
+}
 PING_TYPES = {
     "allInPings": "All In",
     "assistMePings": "Assist Me",
@@ -105,6 +111,11 @@ def display_role(participant: dict) -> str:
     return ROLE_MAP.get(str(role).upper(), str(role).upper())
 
 
+def canonical_champion_name(name: object) -> str:
+    value = str(name or "Unknown")
+    return "Fiddlesticks" if value.casefold() == "fiddlesticks" else value
+
+
 def is_meaningful_match(info: dict) -> bool:
     if int(info.get("gameDuration", 0) or 0) < MINIMUM_GAME_SECONDS:
         return False
@@ -155,7 +166,7 @@ def export_match_history() -> int:
                     "player": participant.get("riotIdGameName") or participant.get("summonerName") or "Unknown",
                     "name": participant_name(participant, tracked),
                     "role": display_role(participant),
-                    "champion": participant.get("championName", "Unknown"),
+                    "champion": canonical_champion_name(participant.get("championName", "Unknown")),
                     "kda": f"{participant.get('kills', 0)}/{participant.get('deaths', 0)}/{participant.get('assists', 0)}",
                     # Extra Riot fields remain available in this export as well
                     # as in their untouched form in SQLite.
@@ -206,7 +217,7 @@ def tracked_match_log() -> list[dict[str, object]]:
         tracked_participants = [p for p in roster_team if p.get("puuid") in tracked]
         tracked_picks = sorted(
             {
-                (tracked[p["puuid"]], str(p.get("championName", "Unknown")))
+                (tracked[p["puuid"]], canonical_champion_name(p.get("championName", "Unknown")))
                 for p in tracked_participants
             }
         )
@@ -223,7 +234,7 @@ def tracked_match_log() -> list[dict[str, object]]:
             "participant_stats": [
                 {
                     "name": tracked[p["puuid"]],
-                    "champion": str(p.get("championName", "Unknown")),
+                    "champion": canonical_champion_name(p.get("championName", "Unknown")),
                     "role": display_role(p),
                     "damage": int(p.get("totalDamageDealtToChampions", 0) or 0),
                     "vision": int(p.get("visionScore", 0) or 0),
@@ -1464,6 +1475,19 @@ def render_with_qualification_thresholds():
         f"https://ddragon.leagueoflegends.com/cdn/{DATA_DRAGON_VERSION}/data/en_US/champion.json"
     )
     renderer.CHAMPION_ROSTER = tuple(sorted(set(renderer.CHAMPION_ROSTER) | recorded_champions))
+    original_champion_icon_url = renderer.champion_icon_url
+
+    def current_champion_icon_url(name: object) -> str:
+        canonical = canonical_champion_name(name)
+        champion_id = COMMUNITY_DRAGON_ICON_IDS.get(canonical.casefold())
+        if champion_id is not None:
+            return (
+                "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/"
+                f"global/default/v1/champion-icons/{champion_id}.png"
+            )
+        return original_champion_icon_url(canonical)
+
+    renderer.champion_icon_url = current_champion_icon_url
     renderer.MIN_CHAMPION_GAMES = 10
     renderer.MIN_COMBO_GAMES = 10
     # Enforce the roster boundary at the renderer input so every downstream
