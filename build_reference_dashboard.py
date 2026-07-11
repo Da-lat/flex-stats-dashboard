@@ -1040,8 +1040,8 @@ def clean_and_order_overview_charts(html: str) -> str:
             (
                 "Top Player Win Rate (5+ Games)",
                 "Bottom Player Win Rate (5+ Games)",
-                "Top Champion Win Rate",
-                "Bottom Champion Win Rate",
+                "Top Champion Win Rate (20+ Games)",
+                "Bottom Champion Win Rate (20+ Games)",
                 "Player KDA",
                 "Match Volume By Weekday",
             )
@@ -1057,6 +1057,43 @@ def clean_and_order_overview_charts(html: str) -> str:
     rebuilt = "\n        " + "\n        ".join(ordered_panels) + remainder
     rebuilt = re.sub(r"[ \t]+(?=\n)", "", rebuilt)
     return html[:opening_end] + rebuilt + html[players_start:]
+
+
+def replace_champion_winrate_charts(html: str, renderer) -> str:
+    """Render the two champion win-rate panels with a dedicated 20-game floor."""
+    champion_totals: dict[str, dict[str, object]] = {}
+    for match in tracked_match_log():
+        won = match["result"] == "Win"
+        for participant in match["participant_stats"]:
+            champion = str(participant["champion"])
+            record = champion_totals.setdefault(champion, {"champion": champion, "games": 0, "wins": 0})
+            record["games"] += 1
+            record["wins"] += int(won)
+    eligible = []
+    for record in champion_totals.values():
+        if int(record["games"]) < 20:
+            continue
+        record["winrate"] = int(record["wins"]) / int(record["games"])
+        eligible.append(record)
+    top_rows = sorted(eligible, key=lambda row: (-float(row["winrate"]), -int(row["games"]), str(row["champion"])))
+    bottom_rows = sorted(eligible, key=lambda row: (float(row["winrate"]), -int(row["games"]), str(row["champion"])))
+    top_panel = renderer.render_bar_chart(
+        "Top Champion Win Rate (20+ Games)", top_rows, "champion", "winrate", renderer.pct,
+        limit=10, max_value=1.0, footer_key="games", footer_formatter=lambda value: f"{renderer.integer(value)} games",
+    )
+    bottom_panel = renderer.render_bar_chart(
+        "Bottom Champion Win Rate (20+ Games)", bottom_rows, "champion", "winrate", renderer.pct,
+        limit=10, max_value=1.0, footer_key="games", footer_formatter=lambda value: f"{renderer.integer(value)} games",
+    )
+    html = re.sub(
+        r'<section class="chart-panel">\s*<h3>Top Champion Win Rate(?: \([^<]*\))?</h3>.*?</section>',
+        top_panel.strip(), html, count=1, flags=re.DOTALL,
+    )
+    html = re.sub(
+        r'<section class="chart-panel">\s*<h3>Bottom Champion Win Rate(?: \([^<]*\))?</h3>.*?</section>',
+        bottom_panel.strip(), html, count=1, flags=re.DOTALL,
+    )
+    return html
 
 
 def roster_matches_section() -> str:
@@ -1181,7 +1218,7 @@ def tracked_champion_history_section() -> str:
     """
 
 
-def render_with_qualification_thresholds() -> None:
+def render_with_qualification_thresholds():
     """Run the proven renderer while applying roster dashboard thresholds."""
     spec = importlib.util.spec_from_file_location("reference_dashboard_renderer", REFERENCE_GENERATOR)
     if spec is None or spec.loader is None:
@@ -1292,13 +1329,14 @@ def render_with_qualification_thresholds() -> None:
     renderer.champion_pool_horizontal_svg = horizontal_champion_pool
     renderer.champion_pool_vertical_svg = vertical_champion_pool
     renderer.build_dashboard(EXPORTED_HISTORY, OUTPUT_DIRECTORY / "index.html")
+    return renderer
 
 
 def main() -> None:
     if not REFERENCE_GENERATOR.exists():
         raise RuntimeError(f"Reference generator not found: {REFERENCE_GENERATOR}")
     count = export_match_history()
-    render_with_qualification_thresholds()
+    renderer = render_with_qualification_thresholds()
     # The original renderer needs ten entries per match to construct its full
     # head-to-head scoreboards. Those contain the anonymous structural rows,
     # so remove that raw match-history section after rendering. All aggregate
@@ -1323,6 +1361,7 @@ def main() -> None:
         "player-pool-grid pool-orientation-horizontal",
         "player-pool-grid pool-orientation-vertical",
     )
+    rendered = replace_champion_winrate_charts(rendered, renderer)
     rendered = re.sub(r'\s*<div class="header-actions"[^>]*>.*?</div>', "", rendered, count=1, flags=re.DOTALL)
     rendered = re.sub(r'\s*<a href="#match-history">Matches</a>', "", rendered, count=1)
     rendered = re.sub(r'\s*<a href="#combos">Combos</a>', "", rendered, count=1)
