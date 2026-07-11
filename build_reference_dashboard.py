@@ -672,6 +672,57 @@ def experimental_vision_chart() -> str:
     """
 
 
+def apply_overall_rankings(
+    rows: list[dict[str, object]],
+    columns: list[tuple[str, str, int, str, bool]],
+    *,
+    scope_key: str | None = None,
+    minimum_games: int = 10,
+    lower_is_better: set[str] | None = None,
+) -> None:
+    """Add peer percentiles and a transparent equal-weight overall score."""
+    lower_is_better = lower_is_better or set()
+    scopes: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for row in rows:
+        scopes[str(row.get(scope_key, "ALL")) if scope_key else "ALL"].append(row)
+
+    for scope_rows in scopes.values():
+        qualified = [row for row in scope_rows if int(row["games"]) >= minimum_games]
+        for row in scope_rows:
+            row["metric_ranks"] = {}
+            row["metric_percentiles"] = {}
+            row["qualified"] = row in qualified
+        for key, _label, _decimals, _suffix, _bipolar in columns:
+            ordered = sorted(
+                qualified,
+                key=lambda row: float(row.get(key, 0) or 0),
+                reverse=key not in lower_is_better,
+            )
+            for index, row in enumerate(ordered, start=1):
+                value = float(row.get(key, 0) or 0)
+                tied_positions = [
+                    position
+                    for position, candidate in enumerate(ordered, start=1)
+                    if float(candidate.get(key, 0) or 0) == value
+                ]
+                average_rank = sum(tied_positions) / len(tied_positions)
+                percentile = 100.0 if len(ordered) == 1 else 100 * (len(ordered) - average_rank) / (len(ordered) - 1)
+                row["metric_ranks"][key] = average_rank
+                row["metric_percentiles"][key] = percentile
+        for row in qualified:
+            percentiles = list(row["metric_percentiles"].values())
+            row["overall_score"] = sum(percentiles) / len(percentiles) if percentiles else 0.0
+        ordered_scores = sorted(qualified, key=lambda row: (-float(row["overall_score"]), str(row["name"])))
+        for rank, row in enumerate(ordered_scores, start=1):
+            row["overall_rank"] = rank
+            row["peer_count"] = len(qualified)
+        for row in scope_rows:
+            if row not in qualified:
+                row["overall_score"] = -1.0
+                row["overall_rank"] = 0
+                row["peer_count"] = len(qualified)
+
+
 def metric_table_html(
     rows: list[dict[str, object]],
     columns: list[tuple[str, str, int, str, bool]],
@@ -694,6 +745,11 @@ def metric_table_html(
     body = []
     for row in rows:
         attrs = row_attributes(row) if row_attributes else ""
+        qualified = bool(row.get("qualified", True))
+        rank = int(row.get("overall_rank", 0) or 0)
+        score = float(row.get("overall_score", -1))
+        rank_html = f"#{rank}" if qualified and rank else "—"
+        score_html = f"{score:.1f}" if qualified and score >= 0 else "Provisional"
         cells = []
         for key, label, decimals, suffix, bipolar in columns:
             value = float(row.get(key, 0) or 0)
@@ -705,18 +761,23 @@ def metric_table_html(
                 background = f"rgba(240,121,131,{0.05 + 0.48 * strength:.3f})"
             else:
                 background = f"rgba(89,197,139,{0.05 + 0.48 * strength:.3f})"
+            metric_rank = row.get("metric_ranks", {}).get(key)
+            peer_count = int(row.get("peer_count", 0) or 0)
+            comparison = f" · Rank {metric_rank:g} of {peer_count}" if metric_rank is not None else " · Provisional sample"
             cells.append(
                 f'<td class="analytics-heat-cell" data-sort="{value:.8f}" '
-                f'style="background:{background}" title="{escape(label)}: {value:.{decimals}f}{escape(suffix)}">'
+                f'style="background:{background}" title="{escape(label)}: {value:.{decimals}f}{escape(suffix)}{comparison}">'
                 f'{value:.{decimals}f}{escape(suffix)}</td>'
             )
         body.append(
             f'<tr {attrs}><td class="analytics-player"><strong>{escape(str(row["name"]))}</strong></td>'
+            f'<td class="analytics-rank" data-sort="{rank if rank else 9999}">{rank_html}</td>'
+            f'<td class="analytics-score" data-sort="{score:.5f}">{score_html}</td>'
             f'<td class="number-cell" data-sort="{int(row["games"])}">{int(row["games"])}</td>{"".join(cells)}</tr>'
         )
     return (
         f'<div class="table-wrap analytics-table-wrap"><table class="sortable-table analytics-table {escape(table_class)}">'
-        f'<thead><tr><th>Player</th><th data-type="number">Games</th>{headers}</tr></thead>'
+        f'<thead><tr><th>Player</th><th data-type="number">Rank</th><th data-type="number">Overall Score</th><th data-type="number">Games</th>{headers}</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table></div>'
     )
 
@@ -743,7 +804,6 @@ def experimental_early_game_chart() -> str:
         row["ahead_wr"] = 100 * sum(bool(record["win"]) for record in ahead) / len(ahead) if ahead else 0
         row["behind_wr"] = 100 * sum(bool(record["win"]) for record in behind) / len(behind) if behind else 0
         rows.append(row)
-    rows.sort(key=lambda row: (str(row["role"]) != "ALL", -float(row["gold15"]), str(row["name"])))
     columns = [
         ("gold10", "Gold Diff @10", 0, "", True), ("gold15", "Gold Diff @15", 0, "", True),
         ("xp10", "XP Diff @10", 0, "", True), ("xp15", "XP Diff @15", 0, "", True),
@@ -753,6 +813,8 @@ def experimental_early_game_chart() -> str:
         ("ahead_wr", "WR When Ahead @15", 1, "%", False),
         ("behind_wr", "WR When Behind @15", 1, "%", False),
     ]
+    apply_overall_rankings(rows, columns, scope_key="role", minimum_games=10)
+    rows.sort(key=lambda row: (str(row["role"]) != "ALL", str(row["role"]), int(row["overall_rank"]) or 9999, str(row["name"])))
     table = metric_table_html(
         rows,
         columns,
@@ -761,8 +823,8 @@ def experimental_early_game_chart() -> str:
     )
     return f"""
     <section id="early-game-performance" class="section analytics-experiment">
-      <div class="section-title"><div><h2>Early-Game Performance</h2><p class="note">Anonymous same-role opponent comparisons from timeline snapshots. Positive differentials are green; deficits are red.</p></div><label class="analytics-filter-label">Role <select id="early-role-filter" class="analytics-filter"><option value="ALL">All roles</option>{''.join(f'<option value="{role}">{role}</option>' for role in sorted(VALID_ROLES))}</select></label></div>
-      <section class="table-panel"><div class="section-heading"><h3>Lane state at 10 and 15 minutes</h3><small>Role views require at least 3 games</small></div>{table}</section>
+      <div class="section-title"><div><h2>Early-Game Performance</h2><p class="note">Anonymous same-role opponent comparisons from timeline snapshots. Overall score is the equal-weight average of each metric's peer percentile.</p></div><label class="analytics-filter-label">Role <select id="early-role-filter" class="analytics-filter"><option value="ALL">All roles</option>{''.join(f'<option value="{role}">{role}</option>' for role in sorted(VALID_ROLES))}</select></label></div>
+      <section class="table-panel"><div class="section-heading"><h3>Lane state at 10 and 15 minutes</h3><small>Ranked within selected role · 10 games to qualify</small></div>{table}</section>
     </section>
     """
 
@@ -790,7 +852,6 @@ def experimental_objective_chart() -> str:
             "first_turret": 100 * total(lambda r: bool(r["participant"].get("firstTowerKill") or r["participant"].get("firstTowerAssist"))) / games,
             "conversion": 100 * total(lambda r: r["converted_takedowns"]) / total(lambda r: r["timeline_takedowns"]) if total(lambda r: r["timeline_takedowns"]) else 0,
         })
-    rows.sort(key=lambda row: -float(row["objective_damage_min"]))
     columns = [
         ("objective_damage_game", "Objective Damage / Game", 0, "", False), ("objective_damage_min", "Objective Damage / Min", 1, "", False),
         ("turret_damage", "Turret Damage / Game", 0, "", False), ("plates", "Plates / Game", 2, "", False),
@@ -801,10 +862,12 @@ def experimental_objective_chart() -> str:
         ("near_enemy_jungler", "Secures Near Enemy Jungler / Game", 2, "", False),
         ("first_turret", "First-Turret Involvement", 1, "%", False), ("conversion", "Takedown to Objective (90s)", 1, "%", False),
     ]
+    apply_overall_rankings(rows, columns, minimum_games=10)
+    rows.sort(key=lambda row: (int(row["overall_rank"]) or 9999, str(row["name"])))
     return f"""
     <section id="objective-contribution" class="section analytics-experiment">
-      <div class="section-title"><div><h2>Objective Contribution</h2><p class="note">Personal objective pressure and timeline-confirmed participation. Conversion means a tracked-player takedown followed by a team structure or epic objective within 90 seconds.</p></div></div>
-      <section class="table-panel"><div class="section-heading"><h3>Objective pressure and conversion</h3><small>{len(rows)} tracked players</small></div>{metric_table_html(rows, columns, "objective-table")}</section>
+      <div class="section-title"><div><h2>Objective Contribution</h2><p class="note">Personal objective pressure and timeline-confirmed participation. Overall score equally weights every displayed metric's peer percentile.</p></div></div>
+      <section class="table-panel"><div class="section-heading"><h3>Objective pressure and conversion</h3><small>{len(rows)} tracked players · 10 games to qualify</small></div>{metric_table_html(rows, columns, "objective-table")}</section>
     </section>
     """
 
@@ -831,7 +894,6 @@ def experimental_mechanics_chart() -> str:
             "saves": total(lambda r: r["challenges"].get("saveAllyFromDeath", 0)) / games,
             "low_hp": total(lambda r: r["challenges"].get("survivedSingleDigitHpCount", 0)) / games,
         })
-    rows.sort(key=lambda row: -float(row["hits"]))
     columns = [
         ("hits", "Skillshots Hit / Game", 1, "", False), ("dodges", "Skillshots Dodged / Game", 1, "", False),
         ("close_dodges", "Close Dodges / Game", 2, "", False), ("ability_casts", "Ability Casts / Min", 1, "", False),
@@ -840,10 +902,12 @@ def experimental_mechanics_chart() -> str:
         ("immobilisations", "Enemies Immobilised / Game", 1, "", False), ("saves", "Allies Saved / Game", 2, "", False),
         ("low_hp", "Single-Digit HP Survivals / Game", 2, "", False),
     ]
+    apply_overall_rankings(rows, columns, minimum_games=10)
+    rows.sort(key=lambda row: (int(row["overall_rank"]) or 9999, str(row["name"])))
     return f"""
     <section id="mechanics-performance" class="section analytics-experiment">
-      <div class="section-title"><div><h2>Mechanics</h2><p class="note">Execution and survival signals from Riot challenge and cast counters, averaged across eligible games.</p></div></div>
-      <section class="table-panel"><div class="section-heading"><h3>Mechanical activity</h3><small>{len(rows)} tracked players</small></div>{metric_table_html(rows, columns, "mechanics-table")}</section>
+      <div class="section-title"><div><h2>Mechanics</h2><p class="note">Execution and survival signals from Riot challenge and cast counters. Overall score equally weights every displayed metric's peer percentile.</p></div></div>
+      <section class="table-panel"><div class="section-heading"><h3>Mechanical activity</h3><small>{len(rows)} tracked players · 10 games to qualify</small></div>{metric_table_html(rows, columns, "mechanics-table")}</section>
     </section>
     """
 
@@ -874,7 +938,6 @@ def experimental_jungle_chart() -> str:
             "gold10": total(lambda r: r["diff"][10]["gold"]) / games, "gold15": total(lambda r: r["diff"][15]["gold"]) / games,
             "xp10": total(lambda r: r["diff"][10]["xp"]) / games, "xp15": total(lambda r: r["diff"][15]["xp"]) / games,
         })
-    rows.sort(key=lambda row: -float(row["gold15"]))
     columns = [
         ("first_clear_cs", "Jungle CS @5 (First-Clear Proxy)", 1, "", False), ("jungle_cs10", "Jungle CS @10", 1, "", False),
         ("initial_buffs", "Initial Buffs", 2, "", False), ("initial_crabs", "Initial Crabs", 2, "", False),
@@ -885,10 +948,12 @@ def experimental_jungle_chart() -> str:
         ("gold10", "Jungle Gold Diff @10", 0, "", True), ("gold15", "Jungle Gold Diff @15", 0, "", True),
         ("xp10", "Jungle XP Diff @10", 0, "", True), ("xp15", "Jungle XP Diff @15", 0, "", True),
     ]
+    apply_overall_rankings(rows, columns, minimum_games=10, lower_is_better={"full_clear"})
+    rows.sort(key=lambda row: (int(row["overall_rank"]) or 9999, str(row["name"])))
     return f"""
     <section id="jungle-performance" class="section analytics-experiment">
-      <div class="section-title"><div><h2>Jungle Dashboard</h2><p class="note">Jungle-role games only. First-clear CS uses the five-minute timeline snapshot; time to 24 jungle CS is a minute-resolution full-clear proxy.</p></div></div>
-      <section class="table-panel"><div class="section-heading"><h3>Pathing, invasion and objective control</h3><small>{len(rows)} tracked junglers · {sum(int(row['games']) for row in rows)} games</small></div>{metric_table_html(rows, columns, "jungle-table")}</section>
+      <div class="section-title"><div><h2>Jungle Dashboard</h2><p class="note">Jungle-role games only. Overall score equally weights peer percentiles; a faster time to 24 jungle CS scores higher.</p></div></div>
+      <section class="table-panel"><div class="section-heading"><h3>Pathing, invasion and objective control</h3><small>{len(rows)} tracked junglers · {sum(int(row['games']) for row in rows)} games · 10 games to qualify</small></div>{metric_table_html(rows, columns, "jungle-table")}</section>
     </section>
     """
 
@@ -899,6 +964,7 @@ def experimental_analytics_script_and_style() -> str:
       .analytics-table-wrap{max-height:720px;overflow:auto}.analytics-table{min-width:1500px}
       .analytics-table th{white-space:normal;min-width:105px;line-height:1.15}.analytics-table th:first-child{min-width:120px}
       .analytics-player{position:sticky;left:0;z-index:1;background:#111b27}.analytics-heat-cell{text-align:center;font-weight:800;font-variant-numeric:tabular-nums}
+      .analytics-rank{font-size:1.05rem;font-weight:900;color:#f3cc68;text-align:center}.analytics-score{font-weight:900;color:#75dba6;text-align:center;white-space:nowrap}
       .analytics-filter-label{display:flex;align-items:center;gap:8px;color:#a9c9e8;font-weight:800}.analytics-filter{background:#111b27;color:#eaf4ff;border:1px solid #31445a;border-radius:7px;padding:8px 12px}
       .early-game-table{min-width:1450px}.objective-table,.jungle-table{min-width:1900px}.mechanics-table{min-width:1450px}
     </style>
