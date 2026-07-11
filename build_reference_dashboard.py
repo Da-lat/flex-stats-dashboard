@@ -211,6 +211,9 @@ def tracked_match_log() -> list[dict[str, object]]:
                     "damage": int(p.get("totalDamageDealtToChampions", 0) or 0),
                     "vision": int(p.get("visionScore", 0) or 0),
                     "max_cs_advantage": p.get("challenges", {}).get("maxCsAdvantageOnLaneOpponent"),
+                    "kill_participation": p.get("challenges", {}).get("killParticipation"),
+                    "lane_advantage": p.get("challenges", {}).get("laningPhaseGoldExpAdvantage"),
+                    "skillshots_dodged": p.get("challenges", {}).get("skillshotsDodged"),
                 }
                 for p in tracked_participants
             ],
@@ -228,7 +231,13 @@ def advanced_stat_awards() -> list[dict[str, object]]:
             name = str(participant["name"])
             record = totals.setdefault(
                 name,
-                {"games": 0, "damage": 0, "vision": 0, "cs_gap_total": 0, "cs_gap_games": 0},
+                {
+                    "games": 0, "damage": 0, "vision": 0,
+                    "cs_gap_total": 0, "cs_gap_games": 0,
+                    "kp_total": 0, "kp_games": 0,
+                    "lane_total": 0, "lane_games": 0,
+                    "dodged_total": 0, "dodged_games": 0,
+                },
             )
             record["games"] += 1
             record["damage"] += int(participant["damage"])
@@ -237,6 +246,15 @@ def advanced_stat_awards() -> list[dict[str, object]]:
             if cs_gap is not None:
                 record["cs_gap_total"] += float(cs_gap)
                 record["cs_gap_games"] += 1
+            for value_key, total_key, games_key in (
+                ("kill_participation", "kp_total", "kp_games"),
+                ("lane_advantage", "lane_total", "lane_games"),
+                ("skillshots_dodged", "dodged_total", "dodged_games"),
+            ):
+                value = participant.get(value_key)
+                if value is not None:
+                    record[total_key] += float(value)
+                    record[games_key] += 1
 
     qualified = [(name, row) for name, row in totals.items() if row["games"] >= 10]
     highest_damage = max(qualified, key=lambda item: item[1]["damage"] / item[1]["games"])
@@ -246,6 +264,13 @@ def advanced_stat_awards() -> list[dict[str, object]]:
         cs_gap_qualified,
         key=lambda item: item[1]["cs_gap_total"] / item[1]["cs_gap_games"],
     )
+    def highest_average(total_key: str, games_key: str):
+        candidates = [item for item in qualified if item[1][games_key] >= 10]
+        return max(candidates, key=lambda item: item[1][total_key] / item[1][games_key])
+
+    hero_name, hero = highest_average("kp_total", "kp_games")
+    lane_name, lane = highest_average("lane_total", "lane_games")
+    feet_name, feet = highest_average("dodged_total", "dodged_games")
     damage_name, damage = highest_damage
     vision_name, vision = highest_vision
     awards = [
@@ -255,7 +280,7 @@ def advanced_stat_awards() -> list[dict[str, object]]:
             "stat": f'{damage["damage"] / damage["games"]:,.0f} damage per game',
             "detail": f'Average damage to champions over {int(damage["games"])} games.',
             "theme": "red",
-            "badge": "DPS",
+            "badge": "K",
         },
         {
             "title": "All Seeing",
@@ -263,7 +288,7 @@ def advanced_stat_awards() -> list[dict[str, object]]:
             "stat": f'{vision["vision"] / vision["games"]:.1f} vision per game',
             "detail": f'Average vision score over {int(vision["games"])} games.',
             "theme": "blue",
-            "badge": "EYE",
+            "badge": "SUPP",
         },
     ]
     gap_name, gap = highest_cs_gap
@@ -274,8 +299,36 @@ def advanced_stat_awards() -> list[dict[str, object]]:
             "stat": f'+{gap["cs_gap_total"] / gap["cs_gap_games"]:,.1f} average max CS advantage per game',
             "detail": f'Average maxCsAdvantageOnLaneOpponent over {int(gap["cs_gap_games"])} recorded games.',
             "theme": "gold",
-            "badge": "CS",
+            "badge": "TOP",
         }
+    )
+    awards.extend(
+        [
+            {
+                "title": "Hero",
+                "winner": hero_name,
+                "stat": f'{hero["kp_total"] / hero["kp_games"] * 100:.1f}% kill participation per game',
+                "detail": f'Average killParticipation over {int(hero["kp_games"])} recorded games.',
+                "theme": "blue",
+                "badge": "KDA",
+            },
+            {
+                "title": "Lane King",
+                "winner": lane_name,
+                "stat": f'+{lane["lane_total"] / lane["lane_games"]:.3f} average lane advantage',
+                "detail": f'Average laningPhaseGoldExpAdvantage over {int(lane["lane_games"])} recorded games.',
+                "theme": "gold",
+                "badge": "WR",
+            },
+            {
+                "title": "Happy Feet",
+                "winner": feet_name,
+                "stat": f'{feet["dodged_total"] / feet["dodged_games"]:.1f} skillshots dodged per game',
+                "detail": f'Average skillshotsDodged over {int(feet["dodged_games"])} recorded games.',
+                "theme": "green",
+                "badge": "GP",
+            },
+        ]
     )
     return awards
 
