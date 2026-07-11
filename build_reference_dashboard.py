@@ -6,7 +6,7 @@ import json
 import re
 import sqlite3
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from functools import lru_cache
 from html import escape
@@ -246,6 +246,164 @@ def tracked_match_log() -> list[dict[str, object]]:
         })
     rows.sort(key=lambda row: int(row["sort"]), reverse=True)
     return rows
+
+
+def timeline_frame(timeline: dict, minute: int) -> dict:
+    """Return the frame closest to an exact minute in a Match-V5 timeline."""
+    frames = timeline.get("info", {}).get("frames", [])
+    target = minute * 60_000
+    return min(frames, key=lambda frame: abs(int(frame.get("timestamp", 0)) - target)) if frames else {}
+
+
+@lru_cache(maxsize=1)
+def experimental_player_records() -> list[dict[str, object]]:
+    """Hydrate tracked-player records with their matching timeline metrics."""
+    with sqlite3.connect(DATABASE) as con:
+        tracked = dict(con.execute("SELECT puuid, display_name FROM tracked_players WHERE puuid IS NOT NULL"))
+        matches = {
+            resource_id: json.loads(payload)
+            for resource_id, payload in con.execute(
+                "SELECT resource_id, payload FROM riot_payloads WHERE kind='match'"
+            )
+        }
+        timelines = {
+            resource_id: json.loads(payload)
+            for resource_id, payload in con.execute(
+                "SELECT resource_id, payload FROM riot_payloads WHERE kind='timeline'"
+            )
+        }
+
+    records = []
+    for match_id, payload in matches.items():
+        info = payload.get("info", {})
+        timeline = timelines.get(match_id)
+        if not timeline or not is_meaningful_match(info):
+            continue
+        participants = info.get("participants", [])
+        teams: dict[int, list[dict]] = defaultdict(list)
+        for participant in participants:
+            teams[int(participant.get("teamId", 0))].append(participant)
+        roster_team = next(
+            (team for team in teams.values() if sum(p.get("puuid") in tracked for p in team) >= 2),
+            None,
+        )
+        if not roster_team:
+            continue
+
+        frames = {minute: timeline_frame(timeline, minute) for minute in (5, 10, 15)}
+        timeline_events = [
+            event
+            for frame in timeline.get("info", {}).get("frames", [])
+            for event in frame.get("events", [])
+        ]
+        epic_events = [event for event in timeline_events if event.get("type") == "ELITE_MONSTER_KILL"]
+        building_events = [event for event in timeline_events if event.get("type") == "BUILDING_KILL"]
+
+        for participant in roster_team:
+            puuid = participant.get("puuid")
+            if puuid not in tracked:
+                continue
+            participant_id = int(participant.get("participantId", 0))
+            team_id = int(participant.get("teamId", 0))
+            role = display_role(participant)
+            opponent = next(
+                (
+                    candidate
+                    for candidate in participants
+                    if int(candidate.get("teamId", 0)) != team_id and display_role(candidate) == role
+                ),
+                None,
+            )
+            opponent_id = int(opponent.get("participantId", 0)) if opponent else 0
+            differentials = {}
+            snapshots = {}
+            for minute, frame in frames.items():
+                participant_frame = frame.get("participantFrames", {}).get(str(participant_id), {})
+                opponent_frame = frame.get("participantFrames", {}).get(str(opponent_id), {})
+                own_cs = int(participant_frame.get("minionsKilled", 0)) + int(participant_frame.get("jungleMinionsKilled", 0))
+                opponent_cs = int(opponent_frame.get("minionsKilled", 0)) + int(opponent_frame.get("jungleMinionsKilled", 0))
+                snapshots[minute] = {
+                    "gold": int(participant_frame.get("totalGold", 0)),
+                    "xp": int(participant_frame.get("xp", 0)),
+                    "cs": own_cs,
+                    "jungle_cs": int(participant_frame.get("jungleMinionsKilled", 0)),
+                    "level": int(participant_frame.get("level", 0)),
+                }
+                differentials[minute] = {
+                    "gold": int(participant_frame.get("totalGold", 0)) - int(opponent_frame.get("totalGold", 0)),
+                    "xp": int(participant_frame.get("xp", 0)) - int(opponent_frame.get("xp", 0)),
+                    "cs": own_cs - opponent_cs,
+                    "level": int(participant_frame.get("level", 0)) - int(opponent_frame.get("level", 0)),
+                }
+
+            objective_involvement = Counter()
+            for event in epic_events:
+                involved = participant_id == int(event.get("killerId", 0)) or participant_id in event.get("assistingParticipantIds", [])
+                if not involved:
+                    continue
+                monster = str(event.get("monsterType", "")).upper()
+                subtype = str(event.get("monsterSubType", "")).upper()
+                if monster == "DRAGON":
+                    objective_involvement["dragon"] += 1
+                elif monster == "BARON_NASHOR":
+                    objective_involvement["baron"] += 1
+                elif monster == "RIFTHERALD":
+                    objective_involvement["herald"] += 1
+                elif monster == "HORDE":
+                    objective_involvement["grub"] += 1
+                elif monster == "ATAKHAN" or "ATAKHAN" in subtype:
+                    objective_involvement["atakhan"] += 1
+
+            takedown_events = [
+                event
+                for event in timeline_events
+                if event.get("type") == "CHAMPION_KILL"
+                and (
+                    participant_id == int(event.get("killerId", 0))
+                    or participant_id in event.get("assistingParticipantIds", [])
+                )
+            ]
+            converted_takedowns = 0
+            for takedown in takedown_events:
+                start = int(takedown.get("timestamp", 0))
+                end = start + 90_000
+                converted = any(
+                    start <= int(event.get("timestamp", 0)) <= end
+                    and int(event.get("killerTeamId", 0) or participants[int(event.get("killerId", 0)) - 1].get("teamId", 0) if int(event.get("killerId", 0)) else 0) == team_id
+                    for event in epic_events
+                ) or any(
+                    start <= int(event.get("timestamp", 0)) <= end
+                    and int(event.get("teamId", 0)) != team_id
+                    for event in building_events
+                )
+                converted_takedowns += int(converted)
+
+            full_clear_minute = None
+            if role == "JUNGLE":
+                for frame in timeline.get("info", {}).get("frames", []):
+                    jungle_cs = int(frame.get("participantFrames", {}).get(str(participant_id), {}).get("jungleMinionsKilled", 0))
+                    if jungle_cs >= 24:
+                        full_clear_minute = int(frame.get("timestamp", 0)) / 60_000
+                        break
+
+            records.append(
+                {
+                    "name": tracked[puuid],
+                    "match_id": match_id,
+                    "role": role,
+                    "win": bool(participant.get("win")),
+                    "minutes": float(info.get("gameDuration", 0)) / 60,
+                    "participant": participant,
+                    "challenges": participant.get("challenges", {}),
+                    "diff": differentials,
+                    "snapshot": snapshots,
+                    "objectives": dict(objective_involvement),
+                    "converted_takedowns": converted_takedowns,
+                    "timeline_takedowns": len(takedown_events),
+                    "full_clear_minute": full_clear_minute,
+                }
+            )
+    return records
 
 
 def advanced_stat_awards() -> list[dict[str, object]]:
@@ -511,6 +669,250 @@ def experimental_vision_chart() -> str:
       <section class="table-panel"><div class="section-heading"><h3>Vision and warding</h3><small>{len(player_stats)} tracked players</small></div><div class="table-wrap"><table class="sortable-table vision-average-table"><thead><tr><th>Player</th><th data-type="number">Games</th>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table></div></section>
     </section>
     <style>.vision-average-table{{min-width:760px}}.vision-average-cell{{text-align:center;font-weight:800;font-variant-numeric:tabular-nums}}</style>
+    """
+
+
+def metric_table_html(
+    rows: list[dict[str, object]],
+    columns: list[tuple[str, str, int, str, bool]],
+    table_class: str,
+    row_attributes=None,
+) -> str:
+    """Render a sortable heat table; bipolar columns distinguish leads/deficits."""
+    maxima = {
+        key: max((abs(float(row.get(key, 0) or 0)) for row in rows), default=0.0)
+        for key, _label, _decimals, _suffix, _bipolar in columns
+    }
+    positive_minima = {
+        key: min((float(row.get(key, 0) or 0) for row in rows if float(row.get(key, 0) or 0) > 0), default=0.0)
+        for key, _label, _decimals, _suffix, _bipolar in columns
+    }
+    headers = "".join(
+        f'<th data-type="number" title="{escape(label)}">{escape(label)}</th>'
+        for _key, label, _decimals, _suffix, _bipolar in columns
+    )
+    body = []
+    for row in rows:
+        attrs = row_attributes(row) if row_attributes else ""
+        cells = []
+        for key, label, decimals, suffix, bipolar in columns:
+            value = float(row.get(key, 0) or 0)
+            strength = abs(value) / maxima[key] if maxima[key] else 0.0
+            if key == "full_clear" and maxima[key] > positive_minima[key]:
+                # A lower clear time is better, so invert this column's heat.
+                strength = (maxima[key] - value) / (maxima[key] - positive_minima[key])
+            if bipolar and value < 0:
+                background = f"rgba(240,121,131,{0.05 + 0.48 * strength:.3f})"
+            else:
+                background = f"rgba(89,197,139,{0.05 + 0.48 * strength:.3f})"
+            cells.append(
+                f'<td class="analytics-heat-cell" data-sort="{value:.8f}" '
+                f'style="background:{background}" title="{escape(label)}: {value:.{decimals}f}{escape(suffix)}">'
+                f'{value:.{decimals}f}{escape(suffix)}</td>'
+            )
+        body.append(
+            f'<tr {attrs}><td class="analytics-player"><strong>{escape(str(row["name"]))}</strong></td>'
+            f'<td class="number-cell" data-sort="{int(row["games"])}">{int(row["games"])}</td>{"".join(cells)}</tr>'
+        )
+    return (
+        f'<div class="table-wrap analytics-table-wrap"><table class="sortable-table analytics-table {escape(table_class)}">'
+        f'<thead><tr><th>Player</th><th data-type="number">Games</th>{headers}</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table></div>'
+    )
+
+
+def experimental_early_game_chart() -> str:
+    records = experimental_player_records()
+    grouped: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
+    for record in records:
+        grouped[(str(record["name"]), "ALL")].append(record)
+        grouped[(str(record["name"]), str(record["role"]))].append(record)
+
+    rows = []
+    for (name, role), player_records in grouped.items():
+        if role != "ALL" and len(player_records) < 3:
+            continue
+        games = len(player_records)
+        row: dict[str, object] = {"name": name, "role": role, "games": games}
+        for minute in (10, 15):
+            for metric in ("gold", "xp", "cs", "level"):
+                row[f"{metric}{minute}"] = sum(float(record["diff"][minute][metric]) for record in player_records) / games
+        ahead = [record for record in player_records if float(record["diff"][15]["gold"]) > 0]
+        behind = [record for record in player_records if float(record["diff"][15]["gold"]) < 0]
+        row["ahead15"] = 100 * len(ahead) / games
+        row["ahead_wr"] = 100 * sum(bool(record["win"]) for record in ahead) / len(ahead) if ahead else 0
+        row["behind_wr"] = 100 * sum(bool(record["win"]) for record in behind) / len(behind) if behind else 0
+        rows.append(row)
+    rows.sort(key=lambda row: (str(row["role"]) != "ALL", -float(row["gold15"]), str(row["name"])))
+    columns = [
+        ("gold10", "Gold Diff @10", 0, "", True), ("gold15", "Gold Diff @15", 0, "", True),
+        ("xp10", "XP Diff @10", 0, "", True), ("xp15", "XP Diff @15", 0, "", True),
+        ("cs10", "CS Diff @10", 1, "", True), ("cs15", "CS Diff @15", 1, "", True),
+        ("level10", "Level Diff @10", 2, "", True), ("level15", "Level Diff @15", 2, "", True),
+        ("ahead15", "Games Ahead @15", 1, "%", False),
+        ("ahead_wr", "WR When Ahead @15", 1, "%", False),
+        ("behind_wr", "WR When Behind @15", 1, "%", False),
+    ]
+    table = metric_table_html(
+        rows,
+        columns,
+        "early-game-table",
+        lambda row: f'data-early-role="{escape(str(row["role"]))}" style="{"" if row["role"] == "ALL" else "display:none"}"',
+    )
+    return f"""
+    <section id="early-game-performance" class="section analytics-experiment">
+      <div class="section-title"><div><h2>Early-Game Performance</h2><p class="note">Anonymous same-role opponent comparisons from timeline snapshots. Positive differentials are green; deficits are red.</p></div><label class="analytics-filter-label">Role <select id="early-role-filter" class="analytics-filter"><option value="ALL">All roles</option>{''.join(f'<option value="{role}">{role}</option>' for role in sorted(VALID_ROLES))}</select></label></div>
+      <section class="table-panel"><div class="section-heading"><h3>Lane state at 10 and 15 minutes</h3><small>Role views require at least 3 games</small></div>{table}</section>
+    </section>
+    """
+
+
+def experimental_objective_chart() -> str:
+    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for record in experimental_player_records():
+        grouped[str(record["name"])].append(record)
+    rows = []
+    for name, player_records in grouped.items():
+        games = len(player_records)
+        minutes = sum(float(record["minutes"]) for record in player_records)
+        total = lambda fn: sum(float(fn(record) or 0) for record in player_records)
+        rows.append({
+            "name": name, "games": games,
+            "objective_damage_game": total(lambda r: r["participant"].get("damageDealtToObjectives", 0)) / games,
+            "objective_damage_min": total(lambda r: r["participant"].get("damageDealtToObjectives", 0)) / minutes,
+            "turret_damage": total(lambda r: r["participant"].get("damageDealtToTurrets", 0)) / games,
+            "plates": total(lambda r: r["challenges"].get("turretPlatesTaken", 0)) / games,
+            **{key: total(lambda r, objective=key: r["objectives"].get(objective, 0)) / games for key in ("dragon", "baron", "herald", "grub", "atakhan")},
+            "steals": total(lambda r: r["participant"].get("objectivesStolen", 0)) / games,
+            "no_smite_steals": total(lambda r: r["challenges"].get("epicMonsterStolenWithoutSmite", 0)) / games,
+            "spawn_secures": total(lambda r: r["challenges"].get("epicMonsterKillsWithin30SecondsOfSpawn", 0)) / games,
+            "near_enemy_jungler": total(lambda r: r["challenges"].get("epicMonsterKillsNearEnemyJungler", 0)) / games,
+            "first_turret": 100 * total(lambda r: bool(r["participant"].get("firstTowerKill") or r["participant"].get("firstTowerAssist"))) / games,
+            "conversion": 100 * total(lambda r: r["converted_takedowns"]) / total(lambda r: r["timeline_takedowns"]) if total(lambda r: r["timeline_takedowns"]) else 0,
+        })
+    rows.sort(key=lambda row: -float(row["objective_damage_min"]))
+    columns = [
+        ("objective_damage_game", "Objective Damage / Game", 0, "", False), ("objective_damage_min", "Objective Damage / Min", 1, "", False),
+        ("turret_damage", "Turret Damage / Game", 0, "", False), ("plates", "Plates / Game", 2, "", False),
+        ("dragon", "Dragon Involvement / Game", 2, "", False), ("baron", "Baron Involvement / Game", 2, "", False),
+        ("herald", "Herald Involvement / Game", 2, "", False), ("grub", "Grub Involvement / Game", 2, "", False),
+        ("atakhan", "Atakhan Involvement / Game", 2, "", False), ("steals", "Steals / Game", 3, "", False),
+        ("no_smite_steals", "No-Smite Steals / Game", 3, "", False), ("spawn_secures", "Secures Within 30s Spawn / Game", 2, "", False),
+        ("near_enemy_jungler", "Secures Near Enemy Jungler / Game", 2, "", False),
+        ("first_turret", "First-Turret Involvement", 1, "%", False), ("conversion", "Takedown to Objective (90s)", 1, "%", False),
+    ]
+    return f"""
+    <section id="objective-contribution" class="section analytics-experiment">
+      <div class="section-title"><div><h2>Objective Contribution</h2><p class="note">Personal objective pressure and timeline-confirmed participation. Conversion means a tracked-player takedown followed by a team structure or epic objective within 90 seconds.</p></div></div>
+      <section class="table-panel"><div class="section-heading"><h3>Objective pressure and conversion</h3><small>{len(rows)} tracked players</small></div>{metric_table_html(rows, columns, "objective-table")}</section>
+    </section>
+    """
+
+
+def experimental_mechanics_chart() -> str:
+    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for record in experimental_player_records():
+        grouped[str(record["name"])].append(record)
+    rows = []
+    for name, player_records in grouped.items():
+        games = len(player_records)
+        minutes = sum(float(record["minutes"]) for record in player_records)
+        total = lambda fn: sum(float(fn(record) or 0) for record in player_records)
+        rows.append({
+            "name": name, "games": games,
+            "hits": total(lambda r: r["challenges"].get("skillshotsHit", 0)) / games,
+            "dodges": total(lambda r: r["challenges"].get("skillshotsDodged", 0)) / games,
+            "close_dodges": total(lambda r: r["challenges"].get("dodgeSkillShotsSmallWindow", 0)) / games,
+            "ability_casts": total(lambda r: sum(float(r["participant"].get(f"spell{slot}Casts", 0) or 0) for slot in range(1, 5))) / minutes,
+            "summoner_casts": total(lambda r: float(r["participant"].get("summoner1Casts", 0) or 0) + float(r["participant"].get("summoner2Casts", 0) or 0)) / games,
+            "cleanses": total(lambda r: r["challenges"].get("quickCleanse", 0)) / games,
+            "flash_multikills": total(lambda r: r["challenges"].get("multikillsAfterAggressiveFlash", 0)) / games,
+            "immobilisations": total(lambda r: r["challenges"].get("enemyChampionImmobilizations", 0)) / games,
+            "saves": total(lambda r: r["challenges"].get("saveAllyFromDeath", 0)) / games,
+            "low_hp": total(lambda r: r["challenges"].get("survivedSingleDigitHpCount", 0)) / games,
+        })
+    rows.sort(key=lambda row: -float(row["hits"]))
+    columns = [
+        ("hits", "Skillshots Hit / Game", 1, "", False), ("dodges", "Skillshots Dodged / Game", 1, "", False),
+        ("close_dodges", "Close Dodges / Game", 2, "", False), ("ability_casts", "Ability Casts / Min", 1, "", False),
+        ("summoner_casts", "Summoner Casts / Game", 1, "", False), ("cleanses", "Quick Cleanses / Game", 3, "", False),
+        ("flash_multikills", "Aggressive-Flash Multikills / Game", 3, "", False),
+        ("immobilisations", "Enemies Immobilised / Game", 1, "", False), ("saves", "Allies Saved / Game", 2, "", False),
+        ("low_hp", "Single-Digit HP Survivals / Game", 2, "", False),
+    ]
+    return f"""
+    <section id="mechanics-performance" class="section analytics-experiment">
+      <div class="section-title"><div><h2>Mechanics</h2><p class="note">Execution and survival signals from Riot challenge and cast counters, averaged across eligible games.</p></div></div>
+      <section class="table-panel"><div class="section-heading"><h3>Mechanical activity</h3><small>{len(rows)} tracked players</small></div>{metric_table_html(rows, columns, "mechanics-table")}</section>
+    </section>
+    """
+
+
+def experimental_jungle_chart() -> str:
+    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for record in experimental_player_records():
+        if record["role"] == "JUNGLE":
+            grouped[str(record["name"])].append(record)
+    rows = []
+    for name, player_records in grouped.items():
+        games = len(player_records)
+        total = lambda fn: sum(float(fn(record) or 0) for record in player_records)
+        clear_samples = [float(record["full_clear_minute"]) for record in player_records if record["full_clear_minute"] is not None]
+        rows.append({
+            "name": name, "games": games,
+            "first_clear_cs": total(lambda r: r["snapshot"][5]["jungle_cs"]) / games,
+            "jungle_cs10": total(lambda r: r["snapshot"][10]["jungle_cs"]) / games,
+            "initial_buffs": total(lambda r: r["challenges"].get("initialBuffCount", 0)) / games,
+            "initial_crabs": total(lambda r: r["challenges"].get("initialCrabCount", 0)) / games,
+            "enemy_camps": total(lambda r: r["challenges"].get("enemyJungleMonsterKills", 0)) / games,
+            "buffs_stolen": total(lambda r: r["challenges"].get("buffsStolen", 0)) / games,
+            "scuttles": total(lambda r: r["challenges"].get("scuttleCrabKills", 0)) / games,
+            "objective_involvement": total(lambda r: sum(float(value) for value in r["objectives"].values())) / games,
+            "steals": total(lambda r: r["participant"].get("objectivesStolen", 0)) / games,
+            "early_takedowns": total(lambda r: r["challenges"].get("takedownsFirstXMinutes", 0)) / games,
+            "full_clear": sum(clear_samples) / len(clear_samples) if clear_samples else 0,
+            "gold10": total(lambda r: r["diff"][10]["gold"]) / games, "gold15": total(lambda r: r["diff"][15]["gold"]) / games,
+            "xp10": total(lambda r: r["diff"][10]["xp"]) / games, "xp15": total(lambda r: r["diff"][15]["xp"]) / games,
+        })
+    rows.sort(key=lambda row: -float(row["gold15"]))
+    columns = [
+        ("first_clear_cs", "Jungle CS @5 (First-Clear Proxy)", 1, "", False), ("jungle_cs10", "Jungle CS @10", 1, "", False),
+        ("initial_buffs", "Initial Buffs", 2, "", False), ("initial_crabs", "Initial Crabs", 2, "", False),
+        ("enemy_camps", "Enemy Jungle Monsters / Game", 1, "", False), ("buffs_stolen", "Buffs Stolen / Game", 2, "", False),
+        ("scuttles", "Scuttles / Game", 2, "", False), ("objective_involvement", "Epic Objective Involvement / Game", 2, "", False),
+        ("steals", "Objective Steals / Game", 3, "", False), ("early_takedowns", "Early Takedowns / Game", 2, "", False),
+        ("full_clear", "Time to 24 Jungle CS", 2, " min", False),
+        ("gold10", "Jungle Gold Diff @10", 0, "", True), ("gold15", "Jungle Gold Diff @15", 0, "", True),
+        ("xp10", "Jungle XP Diff @10", 0, "", True), ("xp15", "Jungle XP Diff @15", 0, "", True),
+    ]
+    return f"""
+    <section id="jungle-performance" class="section analytics-experiment">
+      <div class="section-title"><div><h2>Jungle Dashboard</h2><p class="note">Jungle-role games only. First-clear CS uses the five-minute timeline snapshot; time to 24 jungle CS is a minute-resolution full-clear proxy.</p></div></div>
+      <section class="table-panel"><div class="section-heading"><h3>Pathing, invasion and objective control</h3><small>{len(rows)} tracked junglers · {sum(int(row['games']) for row in rows)} games</small></div>{metric_table_html(rows, columns, "jungle-table")}</section>
+    </section>
+    """
+
+
+def experimental_analytics_script_and_style() -> str:
+    return """
+    <style id="advanced-analytics-style">
+      .analytics-table-wrap{max-height:720px;overflow:auto}.analytics-table{min-width:1500px}
+      .analytics-table th{white-space:normal;min-width:105px;line-height:1.15}.analytics-table th:first-child{min-width:120px}
+      .analytics-player{position:sticky;left:0;z-index:1;background:#111b27}.analytics-heat-cell{text-align:center;font-weight:800;font-variant-numeric:tabular-nums}
+      .analytics-filter-label{display:flex;align-items:center;gap:8px;color:#a9c9e8;font-weight:800}.analytics-filter{background:#111b27;color:#eaf4ff;border:1px solid #31445a;border-radius:7px;padding:8px 12px}
+      .early-game-table{min-width:1450px}.objective-table,.jungle-table{min-width:1900px}.mechanics-table{min-width:1450px}
+    </style>
+    <script id="advanced-analytics-script">
+      (() => {
+        const filter = document.getElementById("early-role-filter");
+        if (!filter) return;
+        filter.addEventListener("change", () => {
+          document.querySelectorAll("[data-early-role]").forEach(row => {
+            row.style.display = row.dataset.earlyRole === filter.value ? "" : "none";
+          });
+        });
+      })();
+    </script>
     """
 
 
@@ -869,9 +1271,19 @@ def main() -> None:
         if upset_end >= 0:
             experimental = experimental[:upset_start] + experimental[upset_end + len("</section>"):]
     experimental_analytics = (
-        experimental_vision_chart().strip()
+        experimental_early_game_chart().strip()
+        + "\n"
+        + experimental_objective_chart().strip()
+        + "\n"
+        + experimental_mechanics_chart().strip()
+        + "\n"
+        + experimental_jungle_chart().strip()
+        + "\n"
+        + experimental_vision_chart().strip()
         + "\n"
         + experimental_ping_chart().strip()
+        + "\n"
+        + experimental_analytics_script_and_style().strip()
         + "\n"
     )
     champion_cards_marker = '<section id="champion-ownership"'
