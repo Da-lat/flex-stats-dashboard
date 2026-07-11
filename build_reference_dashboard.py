@@ -369,6 +369,38 @@ def render_with_qualification_thresholds() -> None:
     renderer.player_role_champion_pool_rows = lambda appearances: original_player_role_champion_pool(
         [row for row in appearances if not renderer.is_spotlight_excluded_player(row.name)]
     )
+    original_build_awards = renderer.build_awards
+    def build_roster_awards(appearances, *args, **kwargs):
+        awards = original_build_awards(appearances, *args, **kwargs)
+        winning_matches: dict[int, list[object]] = {}
+        for appearance in appearances:
+            parsed = renderer.parse_datetime(appearance.timestamp)
+            if appearance.win and parsed is not None and parsed.year >= 2025:
+                winning_matches.setdefault(appearance.match_id, []).append(appearance)
+        if winning_matches:
+            cleanest_rows = min(
+                winning_matches.values(),
+                key=lambda rows: (
+                    sum(row.deaths for row in rows),
+                    -sum(row.kills for row in rows),
+                    rows[0].match_id,
+                ),
+            )
+            deaths = sum(row.deaths for row in cleanest_rows)
+            death_label = "death" if deaths == 1 else "deaths"
+            winners = ", ".join(sorted({row.name for row in cleanest_rows}))
+            for award in awards:
+                if award.get("title") == "Cleanest Team Win":
+                    award.update(
+                        winner=f"Match {cleanest_rows[0].match_id}",
+                        stat=f"{deaths} tracked team {death_label}",
+                        detail=f"{cleanest_rows[0].date_label} - winners: {winners}",
+                        match_id=cleanest_rows[0].match_id,
+                    )
+                    break
+        return awards
+
+    renderer.build_awards = build_roster_awards
     renderer.heat_color = winrate_color
     renderer.heat_text_color = winrate_text_color
     def horizontal_champion_pool(_player, rows):
