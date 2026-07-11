@@ -1452,6 +1452,80 @@ def tracked_champion_history_section() -> str:
     """
 
 
+def build_showcase_share_page(showcase_html: str) -> str:
+    """Build a compact, linkable player card from the generated showcase data."""
+    players = []
+    section_pattern = re.compile(
+        r'<section class="player-showcase[^>]*" data-showcase="([^"]+)".*?'
+        r'<img class="showcase-watermark" src="([^"]+)".*?'
+        r'<div class="showcase-kicker">(.*?)</div>.*?<h2>(.*?)</h2>.*?'
+        r'<p class="showcase-summary">(.*?)</p>.*?'
+        r'<article class="showcase-stat">\s*<span>Games</span>.*?<strong>(.*?)</strong>.*?'
+        r'<article class="showcase-stat">\s*<span>Winrate</span>.*?<strong>(.*?)</strong>.*?'
+        r'<article class="showcase-stat">\s*<span>KDA</span>.*?<strong>(.*?)</strong>.*?'
+        r'<article class="showcase-stat">\s*<span>MVP Score</span>.*?<strong>(.*?)</strong>.*?'
+        r'<article class="showcase-feature">\s*<img[^>]*>\s*<div>.*?<strong>(.*?)</strong>\s*<small>(.*?)</small>',
+        re.DOTALL,
+    )
+    for match in section_pattern.finditer(showcase_html):
+        player_id, icon, kicker, name, summary, games, winrate, kda, mvp, champion, champion_detail = match.groups()
+        players.append({
+            "id": player_id,
+            "icon": icon,
+            "rank": re.sub(r"^Player Showcase\s*/\s*", "", re.sub("<.*?>", "", kicker)).strip(),
+            "name": re.sub("<.*?>", "", name).strip(),
+            "summary": re.sub("<.*?>", "", summary).strip(),
+            "games": games.strip(),
+            "winrate": winrate.strip(),
+            "kda": kda.strip(),
+            "mvp": mvp.strip(),
+            "champion": champion.strip(),
+            "champion_detail": champion_detail.strip(),
+        })
+    data = json.dumps(players, ensure_ascii=False).replace("</", "<\\/")
+    options = "".join(f'<option value="{escape(row["id"])}">{escape(row["name"])}</option>' for row in players)
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>League Flex Player Card</title>
+<style>
+:root{{--bg:#070c12;--panel:#111b27;--line:#2a3b4f;--text:#f5f8fc;--muted:#9fc4e4;--mint:#54e0a4;--blue:#69aefc}}
+*{{box-sizing:border-box}} body{{margin:0;min-height:100vh;background:radial-gradient(circle at 15% 10%,#143653 0,transparent 32%),radial-gradient(circle at 90% 85%,#163e32 0,transparent 35%),var(--bg);color:var(--text);font-family:Inter,Segoe UI,sans-serif;padding:28px}}
+.controls{{max-width:860px;margin:0 auto 18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}} select,button,a{{border:1px solid var(--line);border-radius:9px;background:#111b27;color:var(--text);padding:10px 14px;font-weight:750;text-decoration:none;cursor:pointer}} button.primary{{background:linear-gradient(135deg,#187f61,#276fb1);border-color:#54e0a4}} .card{{position:relative;overflow:hidden;max-width:860px;min-height:500px;margin:auto;padding:42px;border:1px solid #3a536a;border-radius:26px;background:linear-gradient(145deg,rgba(18,31,45,.97),rgba(8,15,24,.98));box-shadow:0 30px 90px #0009}}
+.card:before{{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 45%,rgba(84,224,164,.08));pointer-events:none}} .champ-art{{position:absolute;right:-45px;bottom:-55px;width:390px;height:390px;object-fit:cover;opacity:.18;filter:saturate(1.35);border-radius:50%}} .eyebrow{{color:var(--mint);font-size:.78rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase}} h1{{font-size:clamp(3rem,8vw,6.8rem);line-height:.86;margin:17px 0 20px;letter-spacing:-.06em}} .summary{{position:relative;max-width:620px;color:#c5d9ec;font-size:1.08rem;line-height:1.6}} .stats{{position:relative;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:32px 0}} .stat,.signature{{padding:16px;background:#101d2bdb;border:1px solid var(--line);border-radius:13px}} .stat span,.signature span{{display:block;color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.08em}} .stat b{{display:block;font-size:1.6rem;margin-top:7px}} .signature{{position:relative;display:flex;align-items:center;gap:14px;max-width:470px;border-color:#3d806b}} .signature img{{width:62px;height:62px;border-radius:12px}} .signature strong{{display:block;font-size:1.35rem;margin:4px 0}} .signature small{{color:#b9cee2}} .brand{{position:absolute;right:30px;top:28px;color:#91abc3;font-size:.72rem;font-weight:900;letter-spacing:.12em}}
+.hint{{max-width:860px;margin:14px auto;color:#91abc3;font-size:.84rem;text-align:center}} @media(max-width:650px){{body{{padding:12px}}.card{{padding:28px 20px;min-height:560px}}.stats{{grid-template-columns:repeat(2,1fr)}}.champ-art{{width:270px;height:270px}}}} @media print{{body{{padding:0;background:#070c12;-webkit-print-color-adjust:exact;print-color-adjust:exact}}.controls,.hint{{display:none}}.card{{max-width:none;width:100%;height:100vh;border:0;border-radius:0;box-shadow:none}}}}
+</style></head><body>
+<div class="controls"><a href="index_showcases.html">← Full showcases</a><select id="player-select">{options}</select><button class="primary" id="share-button">Share card</button><button id="copy-button">Copy link</button><button onclick="window.print()">Save as PDF</button></div>
+<main class="card" id="card"><div class="brand">LEAGUE FLEX</div><img class="champ-art" id="champ-art" alt=""><div class="eyebrow" id="rank"></div><h1 id="name"></h1><p class="summary" id="summary"></p><div class="stats"><div class="stat"><span>Games</span><b id="games"></b></div><div class="stat"><span>Win rate</span><b id="winrate"></b></div><div class="stat"><span>KDA</span><b id="kda"></b></div><div class="stat"><span>MVP score</span><b id="mvp"></b></div></div><div class="signature"><img id="champ-icon" alt=""><div><span>Signature champion</span><strong id="champion"></strong><small id="champion-detail"></small></div></div></main>
+<p class="hint">This page has its own player-specific URL. Share it directly or use “Save as PDF” for a compact keepsake.</p>
+<script>const players={data};const select=document.getElementById('player-select');const byId=Object.fromEntries(players.map(p=>[p.id,p]));
+function show(id,write=true){{const p=byId[id]||players[0];if(!p)return;select.value=p.id;for(const key of ['rank','name','summary','games','winrate','kda','mvp','champion'])document.getElementById(key).textContent=p[key];document.getElementById('champion-detail').textContent=p.champion_detail;for(const id of ['champ-art','champ-icon'])document.getElementById(id).src=p.icon;if(write)history.replaceState(null,'','?player='+encodeURIComponent(p.id));document.title=p.name+' — League Flex Player Card'}}
+select.addEventListener('change',()=>show(select.value));document.getElementById('copy-button').addEventListener('click',async e=>{{await navigator.clipboard.writeText(location.href);e.target.textContent='Copied!';setTimeout(()=>e.target.textContent='Copy link',1400)}});document.getElementById('share-button').addEventListener('click',async()=>{{const p=byId[select.value];if(navigator.share)await navigator.share({{title:document.title,text:p.summary,url:location.href}});else document.getElementById('copy-button').click()}});show(new URLSearchParams(location.search).get('player'),false);</script></body></html>"""
+
+
+def enhance_showcases(showcase_html: str) -> str:
+    """Give Showcases a stronger visual identity and add a player-aware share action."""
+    showcase_html = showcase_html.replace("LoL Player Showcases", "League Flex Showcases")
+    showcase_html = showcase_html.replace(
+        "Full-page player recaps, signature picks, personal awards, and match-history arcs from the same Ranked Flex dataset.",
+        "Your Flex careers turned into player stories: signature picks, personal records, form arcs, and friendly rivalries.",
+    )
+    share_button = '<a class="showcase-share-button" data-showcase-share href="showcase_share.html">✦ Share player card</a>'
+    showcase_html = showcase_html.replace('<div class="showcase-count">', share_button + '<div class="showcase-count">', 1)
+    showcase_html = showcase_html.replace(
+        "</head>",
+        """<style id="showcase-polish">
+body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transparent 28%),#080d13}.showcase-toolbar{backdrop-filter:blur(16px);box-shadow:0 18px 50px #0005}.showcase-share-button{align-self:center;padding:11px 15px;border:1px solid #48d7a0;border-radius:9px;color:#eafff7;background:linear-gradient(135deg,#12684f,#205f94);text-decoration:none;font-weight:900;white-space:nowrap}.showcase-share-button:hover{transform:translateY(-1px);filter:brightness(1.12)}.showcase-hero{border-color:#38536c;box-shadow:0 28px 70px #0007}.showcase-title h2{text-shadow:0 8px 30px #000}.showcase-kicker{letter-spacing:.12em}.player-showcase.active{animation:showcase-in .35s ease-out}@keyframes showcase-in{from{opacity:.3;transform:translateY(8px)}to{opacity:1;transform:none}}@media(max-width:700px){.showcase-share-button{width:100%;text-align:center}}
+</style></head>""",
+        1,
+    )
+    showcase_html = showcase_html.replace(
+        "if (showcaseSelect) showcaseSelect.value = target.dataset.showcase;",
+        "if (showcaseSelect) showcaseSelect.value = target.dataset.showcase; const share = document.querySelector('[data-showcase-share]'); if (share) share.href = `showcase_share.html?player=${encodeURIComponent(target.dataset.showcase)}`;",
+        1,
+    )
+    return showcase_html
+
+
 def render_with_qualification_thresholds():
     """Run the proven renderer while applying roster dashboard thresholds."""
     spec = importlib.util.spec_from_file_location("reference_dashboard_renderer", REFERENCE_GENERATOR)
@@ -1768,7 +1842,19 @@ def main() -> None:
         page = re.sub(r'\s*<a href="(?:index_random_pool\.html#random-champion-pool|#random-champion-pool)">Random Pool</a>', "", page)
         page = re.sub(r'<nav>.*?</nav>', SHARED_NAV_HTML, page, count=1, flags=re.DOTALL)
         page = page.replace("</head>", SHARED_NAV_CSS + "</head>", 1)
+        # Retire the old customs wording without changing stable element IDs
+        # such as #custom-meta that existing links may still use.
+        page = re.sub(r"custom-games", "Ranked Flex", page, flags=re.IGNORECASE)
+        page = re.sub(r"custom games", "Flex games", page, flags=re.IGNORECASE)
+        page = re.sub(r"custom game", "Flex game", page, flags=re.IGNORECASE)
         page_path.write_text(page, encoding="utf-8")
+    showcase_path = OUTPUT_DIRECTORY / "index_showcases.html"
+    if showcase_path.exists():
+        showcase = enhance_showcases(showcase_path.read_text(encoding="utf-8"))
+        showcase_path.write_text(showcase, encoding="utf-8")
+        (OUTPUT_DIRECTORY / "showcase_share.html").write_text(
+            build_showcase_share_page(showcase), encoding="utf-8"
+        )
     for removed_page in ("index_draft_coach.html", "index_random_pool.html", "index_head_to_head.html"):
         (OUTPUT_DIRECTORY / removed_page).unlink(missing_ok=True)
     forbidden_site_markers = ("anonymous opposition", "tracked_teammate", "untracked player")
