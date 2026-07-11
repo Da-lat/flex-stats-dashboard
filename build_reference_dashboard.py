@@ -982,6 +982,47 @@ def experimental_analytics_script_and_style() -> str:
     """
 
 
+def order_custom_meta_by_tier(html: str) -> str:
+    """Order meta spotlights and rows by tier, then contested score descending."""
+    tier_order = {tier: index for index, tier in enumerate(("S", "A", "B", "C", "D", "E", "F"))}
+
+    spotlight_pattern = re.compile(
+        r'(<div class="meta-spotlight-grid">)(.*?)(</div>)',
+        flags=re.DOTALL,
+    )
+    spotlight_match = spotlight_pattern.search(html)
+    if spotlight_match:
+        cards = re.findall(r'<article class="meta-spotlight-card.*?</article>', spotlight_match.group(2), flags=re.DOTALL)
+
+        def card_key(card: str) -> tuple[int, float]:
+            tier_match = re.search(r'tier-([a-z])', card)
+            score_match = re.search(r'<b>[A-Z] Tier / ([0-9.]+)</b>', card)
+            tier = tier_match.group(1).upper() if tier_match else "Z"
+            score = float(score_match.group(1)) if score_match else 0.0
+            return tier_order.get(tier, 99), -score
+
+        ordered_cards = "\n            ".join(sorted(cards, key=card_key))
+        html = html[:spotlight_match.start()] + spotlight_match.group(1) + "\n            " + ordered_cards + "\n            " + spotlight_match.group(3) + html[spotlight_match.end():]
+
+    table_pattern = re.compile(
+        r'(<table id="custom-meta-tier-list".*?<tbody>)(.*?)(</tbody>)',
+        flags=re.DOTALL,
+    )
+    table_match = table_pattern.search(html)
+    if table_match:
+        rows = re.findall(r'<tr>.*?</tr>', table_match.group(2), flags=re.DOTALL)
+
+        def row_key(row: str) -> tuple[int, float]:
+            values = re.findall(r'data-sort="([^"]*)"', row)
+            tier = values[0].upper() if values else "Z"
+            score = float(values[-1]) if values else 0.0
+            return tier_order.get(tier, 99), -score
+
+        ordered_rows = "\n".join(sorted(rows, key=row_key))
+        html = html[:table_match.start()] + table_match.group(1) + ordered_rows + table_match.group(3) + html[table_match.end():]
+    return html
+
+
 def roster_matches_section() -> str:
     rows = tracked_match_log()
     def champion_pairs_html(champions: list[str]) -> str:
@@ -1372,6 +1413,7 @@ def main() -> None:
         experimental = experimental.replace(
             "</main>", experimental_analytics + "</main>", 1
         )
+    experimental = order_custom_meta_by_tier(experimental)
     experimental_path.write_text(experimental, encoding="utf-8")
     for page_path in OUTPUT_DIRECTORY.glob("*.html"):
         page = page_path.read_text(encoding="utf-8")
