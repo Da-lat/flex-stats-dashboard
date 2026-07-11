@@ -1689,7 +1689,7 @@ def enhance_showcases(showcase_html: str) -> str:
     fun_controls = ('<div class="showcase-fun-controls"><button type="button" data-showcase-prev>←</button>'
                     '<button type="button" class="random-spotlight" data-showcase-random>✦ Random spotlight</button>'
                     '<button type="button" data-showcase-next>→</button></div>'
-                    '<a class="showcase-share-button" data-showcase-share href="showcase_share.html">Share player card ↗</a>')
+                    '<a class="showcase-share-button" data-showcase-share href="showcase_share.html?v=2">Share player card ↗</a>')
     showcase_html = showcase_html.replace('<div class="showcase-count">', fun_controls + '<div class="showcase-count">', 1)
     showcase_html = showcase_html.replace(
         "</head>",
@@ -1700,7 +1700,7 @@ body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transpa
     )
     showcase_html = showcase_html.replace(
         "if (showcaseSelect) showcaseSelect.value = target.dataset.showcase;",
-        "if (showcaseSelect) showcaseSelect.value = target.dataset.showcase; const share = document.querySelector('[data-showcase-share]'); if (share) share.href = `showcase_share.html?player=${encodeURIComponent(target.dataset.showcase)}`;",
+        "if (showcaseSelect) showcaseSelect.value = target.dataset.showcase; const share = document.querySelector('[data-showcase-share]'); if (share) share.href = `showcase_share.html?v=2&player=${encodeURIComponent(target.dataset.showcase)}`;",
         1,
     )
     showcase_html = showcase_html.replace("</body>", """<script id="showcase-fun-script">

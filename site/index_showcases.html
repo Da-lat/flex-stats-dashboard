@@ -3496,7 +3496,7 @@ body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transpa
           <select data-showcase-compare-select><option value="">No comparison</option><option value="andreas">Andreas</option><option value="brands">Brands</option><option value="cass">Cass</option><option value="dylan">Dylan</option><option value="farmer">Farmer</option><option value="felix">Felix</option><option value="grant">Grant</option><option value="iestyn">Iestyn</option><option value="jake">Jake</option><option value="james">James</option><option value="jay">Jay</option><option value="jordan">Jordan</option><option value="laurel">Laurel</option><option value="leigh">Leigh</option><option value="minz">Minz</option><option value="pete">Pete</option><option value="rich">Rich</option><option value="riri">Riri</option><option value="sam">Sam</option><option value="sean">Sean</option><option value="wyn">Wyn</option></select>
         </label>
       </div>
-      <div class="showcase-fun-controls"><button type="button" data-showcase-prev>←</button><button type="button" class="random-spotlight" data-showcase-random>✦ Random spotlight</button><button type="button" data-showcase-next>→</button></div><a class="showcase-share-button" data-showcase-share href="showcase_share.html">Share player card ↗</a><div class="showcase-count">21 player recaps</div>
+      <div class="showcase-fun-controls"><button type="button" data-showcase-prev>←</button><button type="button" class="random-spotlight" data-showcase-random>✦ Random spotlight</button><button type="button" data-showcase-next>→</button></div><a class="showcase-share-button" data-showcase-share href="showcase_share.html?v=2">Share player card ↗</a><div class="showcase-count">21 player recaps</div>
     </div>
     
             <section class="player-showcase showcase-theme-0" data-showcase="andreas" id="andreas">
@@ -21253,7 +21253,7 @@ body.showcase-body{background:radial-gradient(circle at 12% 8%,#102e47 0,transpa
       const target = showcasePanels.find(panel => panel.dataset.showcase === id) || showcasePanels[0];
       if (!target) return;
       showcasePanels.forEach(panel => panel.classList.toggle("active", panel === target));
-      if (showcaseSelect) showcaseSelect.value = target.dataset.showcase; const share = document.querySelector('[data-showcase-share]'); if (share) share.href = `showcase_share.html?player=${encodeURIComponent(target.dataset.showcase)}`;
+      if (showcaseSelect) showcaseSelect.value = target.dataset.showcase; const share = document.querySelector('[data-showcase-share]'); if (share) share.href = `showcase_share.html?v=2&player=${encodeURIComponent(target.dataset.showcase)}`;
       updateCompareOptions(target.dataset.showcase);
       updateComparePanel();
       if (updateHash) {
