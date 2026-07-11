@@ -22,6 +22,37 @@ Welshy#CYMRU, Petez#Wales | Pete
 
 Open `site/index.html` in a browser after generating it. The reference-style builder uses the proven renderer from `Custom_match_dashboards` to generate its full linked HTML dashboard suite. Re-run the two commands when you want to refresh.
 
+## Manual refresh and publish
+
+You can update the dashboard without using AI. From PowerShell in the project folder, run:
+
+```powershell
+python sync_riot.py
+python build_reference_dashboard.py
+```
+
+The first command downloads and caches newly available Riot data. The second command rebuilds the static HTML files in `site/`.
+
+To publish the refreshed dashboard to GitHub Pages, run:
+
+```powershell
+git add players.txt site
+git commit -m "Refresh Riot Flex data"
+git push
+```
+
+The complete refresh and publish sequence is:
+
+```powershell
+python sync_riot.py
+python build_reference_dashboard.py
+git add players.txt site
+git commit -m "Refresh Riot Flex data"
+git push
+```
+
+The Riot API key must be valid in `.streamlit/secrets.toml`. Existing matches and timelines are reused from SQLite, while match-ID lists refresh every 15 minutes. GitHub Pages deploys automatically after the push.
+
 ## Archive and cache behaviour
 
 `data/riot_cache.sqlite3` is a persistent archive, not merely an aggregate cache. It stores the untouched JSON returned by Riot for accounts, summoners, ranks, match lists, every Match-V5 response, and every Match-V5 timeline. This preserves all available post-game participant fields, including damage, vision, objectives, wards, items, multikills, CS, gold and challenges, plus timeline frames and events.
