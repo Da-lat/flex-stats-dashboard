@@ -926,6 +926,71 @@ def experimental_performance_galaxy() -> str:
     """
 
 
+def compact_champion_ownership_section(renderer) -> str:
+    champion_pilots: dict[str, dict[str, dict[str, int]]] = defaultdict(lambda: defaultdict(lambda: {"games": 0, "wins": 0}))
+    for match in tracked_match_log():
+        won = match["result"] == "Win"
+        for participant in match["participant_stats"]:
+            champion = str(participant["champion"])
+            name = str(participant["name"])
+            champion_pilots[champion][name]["games"] += 1
+            champion_pilots[champion][name]["wins"] += int(won)
+
+    rows = []
+    for champion, pilots in champion_pilots.items():
+        pilot_rows = [
+            {
+                "name": name,
+                "games": stats["games"],
+                "wins": stats["wins"],
+                "winrate": stats["wins"] / stats["games"],
+            }
+            for name, stats in pilots.items()
+        ]
+        established = [pilot for pilot in pilot_rows if int(pilot["games"]) >= 3]
+        comparison_pool = established if len(established) >= 2 else pilot_rows
+        best = sorted(comparison_pool, key=lambda pilot: (-float(pilot["winrate"]), -int(pilot["games"]), str(pilot["name"])))[0]
+        if len(established) == 1:
+            best = established[0]
+            worst_pool = [pilot for pilot in pilot_rows if pilot["name"] != best["name"]] or established
+        else:
+            worst_pool = comparison_pool
+        worst = sorted(worst_pool, key=lambda pilot: (float(pilot["winrate"]), -int(pilot["games"]), str(pilot["name"])))[0]
+        games = sum(int(pilot["games"]) for pilot in pilot_rows)
+        wins = sum(int(pilot["wins"]) for pilot in pilot_rows)
+        rows.append({
+            "champion": champion,
+            "games": games,
+            "winrate": wins / games,
+            "pilots": len(pilot_rows),
+            "best": best,
+            "worst": worst,
+        })
+    rows.sort(key=lambda row: (-int(row["games"]), str(row["champion"])))
+
+    items = []
+    for row in rows:
+        best, worst = row["best"], row["worst"]
+        search = f'{row["champion"]} {best["name"]} {worst["name"]}'.casefold()
+        items.append(f'''
+        <article class="compact-ownership-item" data-ownership-search="{escape(search)}">
+          <img src="{escape(renderer.champion_icon_url(str(row['champion'])))}" alt="{escape(str(row['champion']))}">
+          <div class="ownership-champion"><strong>{escape(str(row['champion']))}</strong><small>{row['games']} games · {100 * float(row['winrate']):.1f}% WR · {row['pilots']} pilot{'s' if row['pilots'] != 1 else ''}</small></div>
+          <div class="ownership-pilot ownership-best"><span>Best</span><strong>{escape(str(best['name']))}</strong><small>{100 * float(best['winrate']):.1f}% · {best['games']}g</small></div>
+          <div class="ownership-pilot ownership-worst"><span>Worst</span><strong>{escape(str(worst['name']))}</strong><small>{100 * float(worst['winrate']):.1f}% · {worst['games']}g</small></div>
+        </article>''')
+
+    return f"""
+    <section id="champion-ownership" class="section compact-ownership-section">
+      <div class="section-title"><div><h2>Champion Ownership</h2><p class="note">Every champion with tracked games, ordered by play volume. Established pilots use a 3-game floor; occasional pilots are used as the fallback comparison.</p></div></div>
+      <section class="table-panel"><div class="section-heading"><h3>Tracked champion pilots</h3><div class="ownership-controls"><span id="ownership-count">{len(rows)} champions</span><input id="ownership-search" class="table-search" type="search" placeholder="Search champion or player"></div></div><div id="compact-ownership-grid" class="compact-ownership-grid">{''.join(items)}</div></section>
+    </section>
+    <style id="compact-ownership-style">
+      .ownership-controls{{display:flex;align-items:center;gap:12px}}.ownership-controls span{{color:#9fc4e4;font-size:.82rem;font-weight:800;white-space:nowrap}}.compact-ownership-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:12px;max-height:900px;overflow:auto}}.compact-ownership-item{{display:grid;grid-template-columns:38px minmax(120px,1.25fr) minmax(105px,1fr) minmax(105px,1fr);align-items:center;gap:9px;min-height:52px;padding:6px 9px;background:#121e2b;border:1px solid #293a4c;border-radius:8px}}.compact-ownership-item:hover{{border-color:#4e708f;background:#162535}}.compact-ownership-item>img{{width:36px;height:36px;object-fit:cover;border-radius:7px;border:1px solid #405873}}.ownership-champion,.ownership-pilot{{display:grid;gap:1px;min-width:0}}.ownership-champion strong,.ownership-pilot strong{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#f2f7ff}}.ownership-champion small,.ownership-pilot small{{color:#9fc0dc;font-size:.73rem;white-space:nowrap}}.ownership-pilot{{padding-left:9px;border-left:1px solid #2c3d50}}.ownership-pilot span{{font-size:.63rem;font-weight:900;text-transform:uppercase;letter-spacing:.8px}}.ownership-best span{{color:#60d89b}}.ownership-worst span{{color:#f17b88}}@media(max-width:950px){{.compact-ownership-grid{{grid-template-columns:1fr}}}}@media(max-width:560px){{.compact-ownership-item{{grid-template-columns:34px 1fr 1fr}}.compact-ownership-item>img{{width:32px;height:32px}}.ownership-worst{{grid-column:2 / -1;border-left:0;border-top:1px solid #2c3d50;padding:5px 0 0}}.ownership-controls{{align-items:stretch;flex-direction:column}}}}
+    </style>
+    """
+
+
 def experimental_early_game_chart() -> str:
     records = experimental_player_records()
     grouped: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
@@ -1122,29 +1187,20 @@ def experimental_analytics_script_and_style() -> str:
             });
           });
         }
-        const tooltip = document.getElementById("galaxy-tooltip");
-        const stage = document.querySelector(".galaxy-stage");
-        if (!tooltip || !stage) return;
-        const show = (event, player) => {
-          const [name, summary, detail] = player.dataset.galaxyDetail.split("|");
-          tooltip.querySelector("strong").textContent = name;
-          tooltip.querySelector("span").textContent = summary;
-          tooltip.querySelector("small").textContent = detail;
-          const bounds = stage.getBoundingClientRect();
-          const x = event.clientX ? event.clientX - bounds.left : bounds.width / 2;
-          const y = event.clientY ? event.clientY - bounds.top : 70;
-          tooltip.style.left = `${Math.min(Math.max(8, x + 14), Math.max(8, bounds.width - 330))}px`;
-          tooltip.style.top = `${Math.max(8, y - 80)}px`;
-          tooltip.classList.add("visible");
-          tooltip.setAttribute("aria-hidden", "false");
-        };
-        document.querySelectorAll(".galaxy-player").forEach(player => {
-          player.addEventListener("pointerenter", event => show(event, player));
-          player.addEventListener("pointermove", event => show(event, player));
-          player.addEventListener("pointerleave", () => tooltip.classList.remove("visible"));
-          player.addEventListener("focus", event => show(event, player));
-          player.addEventListener("blur", () => tooltip.classList.remove("visible"));
-        });
+        const ownershipSearch = document.getElementById("ownership-search");
+        const ownershipCount = document.getElementById("ownership-count");
+        if (ownershipSearch) {
+          ownershipSearch.addEventListener("input", () => {
+            const query = ownershipSearch.value.trim().toLocaleLowerCase();
+            let visible = 0;
+            document.querySelectorAll("[data-ownership-search]").forEach(item => {
+              const show = !query || item.dataset.ownershipSearch.includes(query);
+              item.hidden = !show;
+              visible += Number(show);
+            });
+            if (ownershipCount) ownershipCount.textContent = `${visible} champions`;
+          });
+        }
       })();
     </script>
     """
@@ -1628,10 +1684,6 @@ def main() -> None:
         upset_end = experimental.find("</section>", upset_start)
         if upset_end >= 0:
             experimental = experimental[:upset_start] + experimental[upset_end + len("</section>"):]
-    performance_galaxy = experimental_performance_galaxy().strip() + "\n"
-    player_pool_marker = '<section id="experimental-player-pools"'
-    if player_pool_marker in experimental:
-        experimental = experimental.replace(player_pool_marker, performance_galaxy + player_pool_marker, 1)
     experimental_analytics = (
         experimental_early_game_chart().strip()
         + "\n"
@@ -1661,6 +1713,15 @@ def main() -> None:
         experimental = experimental.replace(
             "</main>", experimental_analytics + "</main>", 1
         )
+    ownership_start = experimental.find('<section id="champion-ownership"')
+    if ownership_start >= 0:
+        ownership_end = experimental.find("</section>", ownership_start)
+        if ownership_end >= 0:
+            experimental = (
+                experimental[:ownership_start]
+                + compact_champion_ownership_section(renderer).strip()
+                + experimental[ownership_end + len("</section>"):]
+            )
     experimental = order_custom_meta_by_tier(experimental)
     experimental_path.write_text(experimental, encoding="utf-8")
     for page_path in OUTPUT_DIRECTORY.glob("*.html"):
