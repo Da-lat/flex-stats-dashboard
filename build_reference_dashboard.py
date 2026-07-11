@@ -186,11 +186,11 @@ def tracked_match_log() -> list[dict[str, object]]:
         roster_team = next((team for team in teams.values() if sum(p.get("puuid") in tracked for p in team) >= 2), None)
         if not roster_team:
             continue
+        tracked_participants = [p for p in roster_team if p.get("puuid") in tracked]
         tracked_picks = sorted(
             {
                 (tracked[p["puuid"]], str(p.get("championName", "Unknown")))
-                for p in roster_team
-                if p.get("puuid") in tracked
+                for p in tracked_participants
             }
         )
         names = sorted({name for name, _champion in tracked_picks})
@@ -203,11 +203,77 @@ def tracked_match_log() -> list[dict[str, object]]:
             "sort": timestamp or 0,
             "players": names,
             "champions": [f"{name}: {champion}" for name, champion in tracked_picks],
+            "participant_stats": [
+                {
+                    "name": tracked[p["puuid"]],
+                    "champion": str(p.get("championName", "Unknown")),
+                    "role": display_role(p),
+                    "damage": int(p.get("totalDamageDealtToChampions", 0) or 0),
+                    "vision": int(p.get("visionScore", 0) or 0),
+                    "max_cs_advantage": p.get("challenges", {}).get("maxCsAdvantageOnLaneOpponent"),
+                }
+                for p in tracked_participants
+            ],
             "result": "Win" if roster_team[0].get("win") else "Loss",
             "minutes": round(info.get("gameDuration", 0) / 60, 1),
         })
     rows.sort(key=lambda row: int(row["sort"]), reverse=True)
     return rows
+
+
+def advanced_stat_awards() -> list[dict[str, object]]:
+    totals: dict[str, dict[str, float]] = {}
+    largest_cs_gap: tuple[float, str, dict[str, object], dict[str, object]] | None = None
+    for match in tracked_match_log():
+        for participant in match["participant_stats"]:
+            name = str(participant["name"])
+            record = totals.setdefault(name, {"games": 0, "damage": 0, "vision": 0})
+            record["games"] += 1
+            record["damage"] += int(participant["damage"])
+            record["vision"] += int(participant["vision"])
+            cs_gap = participant.get("max_cs_advantage")
+            if cs_gap is not None:
+                candidate = (float(cs_gap), name, participant, match)
+                if largest_cs_gap is None or candidate[0] > largest_cs_gap[0]:
+                    largest_cs_gap = candidate
+
+    qualified = [(name, row) for name, row in totals.items() if row["games"] >= 10]
+    highest_damage = max(qualified, key=lambda item: item[1]["damage"] / item[1]["games"])
+    highest_vision = max(qualified, key=lambda item: item[1]["vision"] / item[1]["games"])
+    damage_name, damage = highest_damage
+    vision_name, vision = highest_vision
+    awards = [
+        {
+            "title": "DPS Check",
+            "winner": damage_name,
+            "stat": f'{damage["damage"] / damage["games"]:,.0f} damage per game',
+            "detail": f'Average damage to champions over {int(damage["games"])} games.',
+            "theme": "red",
+            "badge": "DPS",
+        },
+        {
+            "title": "All Seeing",
+            "winner": vision_name,
+            "stat": f'{vision["vision"] / vision["games"]:.1f} vision per game',
+            "detail": f'Average vision score over {int(vision["games"])} games.',
+            "theme": "blue",
+            "badge": "EYE",
+        },
+    ]
+    if largest_cs_gap is not None:
+        gap, name, participant, match = largest_cs_gap
+        awards.append(
+            {
+                "title": "Player Gap",
+                "winner": name,
+                "stat": f"+{gap:,.1f} maximum CS advantage",
+                "detail": f'{participant["champion"]} ({participant["role"]}) · Match {match["number"]}',
+                "theme": "gold",
+                "badge": "CS",
+                "match_id": match["number"],
+            }
+        )
+    return awards
 
 
 def roster_matches_section() -> str:
@@ -398,6 +464,7 @@ def render_with_qualification_thresholds() -> None:
                         match_id=cleanest_rows[0].match_id,
                     )
                     break
+        awards.extend(advanced_stat_awards())
         return awards
 
     renderer.build_awards = build_roster_awards
