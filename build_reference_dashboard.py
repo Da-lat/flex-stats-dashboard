@@ -35,7 +35,7 @@ PING_TYPES = {
     "getBackPings": "Get Back",
     "holdPings": "Hold",
     "needVisionPings": "Need Vision",
-    "onMyWayPings": "On My Way",
+    "onMyWayPings": "On the Way",
     "pushPings": "Push",
     "retreatPings": "Retreat",
     "visionClearedPings": "Vision Cleared",
@@ -364,43 +364,78 @@ def experimental_ping_chart() -> str:
                 {
                     "games": 0,
                     "totals": {key: 0 for key in PING_TYPES},
-                    "samples": {key: 0 for key in PING_TYPES},
                 },
             )
             record["games"] += 1
             for key, value in participant["pings"].items():
                 record["totals"][key] += int(value)
-                record["samples"][key] += 1
+
+    # Riot leaves several legacy ping fields at zero in every match. Keeping
+    # those columns adds noise without conveying any information.
+    relevant_ping_types = [
+        key
+        for key in PING_TYPES
+        if sum(int(record["totals"][key]) for record in player_stats.values()) > 0
+    ]
 
     averages = {
         name: {
-            key: record["totals"][key] / record["samples"][key]
-            if record["samples"][key]
-            else 0.0
-            for key in PING_TYPES
+            key: record["totals"][key] / record["games"] if record["games"] else 0.0
+            for key in relevant_ping_types
         }
         for name, record in player_stats.items()
     }
+    for name, row in averages.items():
+        row["total"] = sum(row[key] for key in relevant_ping_types)
+
+    displayed_columns = [*relevant_ping_types, "total"]
+    column_labels = {**PING_TYPES, "total": "Total / Game"}
     column_max = {
         key: max((row[key] for row in averages.values()), default=0.0)
-        for key in PING_TYPES
+        for key in displayed_columns
     }
+    column_median = {}
+    for key in displayed_columns:
+        values = sorted(row[key] for row in averages.values() if row[key] > 0)
+        middle = len(values) // 2
+        column_median[key] = (
+            (values[middle - 1] + values[middle]) / 2
+            if len(values) % 2 == 0 and values
+            else values[middle] if values else 0.0
+        )
+
+    def heat_style(key: str, value: float) -> tuple[str, str]:
+        """Return a robust colour and outlier label for a ping average."""
+        if value <= 0:
+            return "background:rgba(98,168,255,.025)", "No recorded pings"
+        median = column_median[key]
+        ratio = value / median if median else 1.0
+        if ratio >= 5:
+            return "background:rgba(255,76,105,.72)", "Extreme outlier"
+        if ratio >= 3:
+            return "background:rgba(255,139,72,.64)", "Strong outlier"
+        if ratio >= 1.75:
+            return "background:rgba(246,199,94,.53);color:#fff2c2", "Above typical"
+        strength = value / column_max[key] if column_max[key] else 0.0
+        return f"background:rgba(98,168,255,{0.07 + 0.38 * strength:.3f})", "Typical range"
+
     headers = "".join(
-        f'<th data-type="number" title="Average {escape(label)} pings per recorded game">{escape(label)}</th>'
-        for label in PING_TYPES.values()
+        f'<th class="{"ping-total-heading" if key == "total" else ""}" data-type="number" '
+        f'title="Average {escape(column_labels[key])} pings per eligible game">{escape(column_labels[key])}</th>'
+        for key in displayed_columns
     )
+    omitted_count = len(PING_TYPES) - len(relevant_ping_types)
+    omitted_note = f" · {omitted_count} all-zero types hidden" if omitted_count else ""
     rows = []
     for name in sorted(player_stats):
         cells = []
-        for key in PING_TYPES:
+        for key in displayed_columns:
             value = averages[name][key]
-            strength = value / column_max[key] if column_max[key] else 0.0
-            alpha = 0.04 + (0.62 * strength)
-            samples = int(player_stats[name]["samples"][key])
+            style, outlier_label = heat_style(key, value)
             cells.append(
-                f'<td class="ping-heat-cell" data-sort="{value:.6f}" '
-                f'style="background:rgba(98,168,255,{alpha:.3f})" '
-                f'title="{escape(PING_TYPES[key])}: {value:.2f} average across {samples} recorded games">{value:.2f}</td>'
+                f'<td class="ping-heat-cell {"ping-total-cell" if key == "total" else ""}" data-sort="{value:.6f}" '
+                f'style="{style}" title="{escape(column_labels[key])}: {value:.2f} per game across '
+                f'{player_stats[name]["games"]} games · {outlier_label}">{value:.2f}</td>'
             )
         rows.append(
             f'<tr><td class="ping-player"><strong>{escape(name)}</strong></td>'
@@ -409,10 +444,10 @@ def experimental_ping_chart() -> str:
         )
     return f"""
     <section id="ping-averages" class="section ping-experiment">
-      <div class="section-title"><div><h2>Ping Averages</h2><p class="note">Average pings per tracked-player game. Colour intensity is scaled independently within each ping type; hover a cell for its recorded sample.</p></div></div>
-      <section class="table-panel"><div class="section-heading"><h3>Communication heatmap</h3><small>{len(player_stats)} tracked players · {len(PING_TYPES)} ping types</small></div><div class="table-wrap ping-table-wrap"><table class="sortable-table ping-table"><thead><tr><th>Player</th><th data-type="number">Games</th>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table></div></section>
+      <div class="section-title"><div><h2>Ping Averages</h2><p class="note">Average pings per eligible tracked-player game. Blue is typical, gold is above typical, orange is a strong outlier and red is extreme. Hover any value for details.</p></div></div>
+      <section class="table-panel"><div class="section-heading"><h3>Communication heatmap</h3><small>{len(player_stats)} tracked players · {len(relevant_ping_types)} useful ping types{omitted_note}</small></div><div class="table-wrap ping-table-wrap"><table class="sortable-table ping-table"><thead><tr><th>Player</th><th data-type="number">Games</th>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table></div></section>
     </section>
-    <style>.ping-table-wrap{{max-height:720px;overflow:auto}}.ping-table{{min-width:1700px}}.ping-table th{{white-space:normal;min-width:88px;line-height:1.15}}.ping-table th:first-child{{min-width:120px}}.ping-player{{position:sticky;left:0;z-index:1;background:#111b27}}.ping-heat-cell{{text-align:center;font-weight:800;font-variant-numeric:tabular-nums}}</style>
+    <style>.ping-table-wrap{{max-height:720px;overflow:auto}}.ping-table{{min-width:1350px}}.ping-table th{{white-space:normal;min-width:88px;line-height:1.15}}.ping-table th:first-child{{min-width:120px}}.ping-player{{position:sticky;left:0;z-index:1;background:#111b27}}.ping-heat-cell{{text-align:center;font-weight:800;font-variant-numeric:tabular-nums}}.ping-total-heading,.ping-total-cell{{border-left:2px solid #6686aa!important}}.ping-total-cell{{font-size:1.02rem}}</style>
     """
 
 
