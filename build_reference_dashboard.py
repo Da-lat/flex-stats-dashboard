@@ -2080,9 +2080,12 @@ def main() -> None:
     losses = len(match_rows) - wins
     overall_winrate = 100 * wins / max(1, len(match_rows))
     rendered = re.sub(
-        r'<article class="metric-card">\s*<span>Busiest Day</span>.*?</article>',
-        '<article class="metric-card"><span>Overall Win Rate</span>'
-        f'<strong>{overall_winrate:.1f}%</strong><small>{wins}-{losses} record across all eligible games</small></article>',
+        r'(<article class="metric-card">\s*<span>Busiest Day</span>.*?</article>)',
+        lambda match: (
+            match.group(1)
+            + '<article class="metric-card"><span>Overall Win Rate</span>'
+            f'<strong>{overall_winrate:.1f}%</strong><small>{wins}-{losses} record across all eligible games</small></article>'
+        ),
         rendered,
         count=1,
         flags=re.DOTALL,
