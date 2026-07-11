@@ -998,7 +998,7 @@ def compact_champion_ownership_section(renderer) -> str:
       <section class="table-panel"><div class="section-heading"><h3>Tracked champion pilots</h3><div class="ownership-controls"><span id="ownership-count">{len(rows)} champions</span><input id="ownership-search" class="table-search" type="search" placeholder="Search champion or player"></div></div><div id="compact-ownership-grid" class="compact-ownership-grid">{''.join(items)}</div></section>
     </section>
     <style id="compact-ownership-style">
-      .ownership-controls{{display:flex;align-items:center;gap:12px}}.ownership-controls span{{color:#9fc4e4;font-size:.82rem;font-weight:800;white-space:nowrap}}.compact-ownership-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:12px;max-height:900px;overflow:auto}}.compact-ownership-item{{display:grid;grid-template-columns:38px minmax(120px,1.25fr) minmax(105px,1fr) minmax(105px,1fr);align-items:center;gap:9px;min-height:52px;padding:6px 9px;background:#121e2b;border:1px solid #293a4c;border-radius:8px}}.compact-ownership-item:hover{{border-color:#4e708f;background:#162535}}.compact-ownership-item>img{{width:36px;height:36px;object-fit:cover;border-radius:7px;border:1px solid #405873}}.ownership-champion,.ownership-pilot{{display:grid;gap:1px;min-width:0}}.ownership-champion strong,.ownership-pilot strong{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#f2f7ff}}.ownership-champion small,.ownership-pilot small{{color:#9fc0dc;font-size:.73rem;white-space:nowrap}}.ownership-pilot{{padding-left:9px;border-left:1px solid #2c3d50}}.ownership-pilot span{{font-size:.63rem;font-weight:900;text-transform:uppercase;letter-spacing:.8px}}.ownership-best span{{color:#60d89b}}.ownership-worst span{{color:#f17b88}}@media(max-width:950px){{.compact-ownership-grid{{grid-template-columns:1fr}}}}@media(max-width:560px){{.compact-ownership-item{{grid-template-columns:34px 1fr 1fr}}.compact-ownership-item>img{{width:32px;height:32px}}.ownership-worst{{grid-column:2 / -1;border-left:0;border-top:1px solid #2c3d50;padding:5px 0 0}}.ownership-controls{{align-items:stretch;flex-direction:column}}}}
+      .ownership-controls{{display:flex;align-items:center;gap:12px}}.ownership-controls span{{color:#9fc4e4;font-size:.82rem;font-weight:800;white-space:nowrap}}.compact-ownership-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:12px;max-height:900px;overflow:auto}}.compact-ownership-item{{display:grid;grid-template-columns:38px minmax(120px,1.25fr) minmax(105px,1fr) minmax(105px,1fr);align-items:center;gap:9px;min-height:52px;padding:6px 9px;background:#121e2b;border:1px solid #293a4c;border-radius:8px}}.compact-ownership-item[hidden]{{display:none}}.compact-ownership-item:hover{{border-color:#4e708f;background:#162535}}.compact-ownership-item>img{{width:36px;height:36px;object-fit:cover;border-radius:7px;border:1px solid #405873}}.ownership-champion,.ownership-pilot{{display:grid;gap:1px;min-width:0}}.ownership-champion strong,.ownership-pilot strong{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#f2f7ff}}.ownership-champion small,.ownership-pilot small{{color:#9fc0dc;font-size:.73rem;white-space:nowrap}}.ownership-pilot{{padding-left:9px;border-left:1px solid #2c3d50}}.ownership-pilot span{{font-size:.63rem;font-weight:900;text-transform:uppercase;letter-spacing:.8px}}.ownership-best span{{color:#60d89b}}.ownership-worst span{{color:#f17b88}}@media(max-width:950px){{.compact-ownership-grid{{grid-template-columns:1fr}}}}@media(max-width:560px){{.compact-ownership-item{{grid-template-columns:34px 1fr 1fr}}.compact-ownership-item>img{{width:32px;height:32px}}.ownership-worst{{grid-column:2 / -1;border-left:0;border-top:1px solid #2c3d50;padding:5px 0 0}}.ownership-controls{{align-items:stretch;flex-direction:column}}}}
     </style>
     """
 
@@ -1199,20 +1199,18 @@ def experimental_analytics_script_and_style() -> str:
             });
           });
         }
-        const ownershipSearch = document.getElementById("ownership-search");
-        const ownershipCount = document.getElementById("ownership-count");
-        if (ownershipSearch) {
-          ownershipSearch.addEventListener("input", () => {
-            const query = ownershipSearch.value.trim().toLocaleLowerCase();
-            let visible = 0;
-            document.querySelectorAll("[data-ownership-search]").forEach(item => {
-              const show = !query || item.dataset.ownershipSearch.includes(query);
-              item.hidden = !show;
-              visible += Number(show);
-            });
-            if (ownershipCount) ownershipCount.textContent = `${visible} champions`;
+        document.addEventListener("input", event => {
+          if (event.target.id !== "ownership-search") return;
+          const query = event.target.value.trim().toLocaleLowerCase();
+          let visible = 0;
+          document.querySelectorAll("[data-ownership-search]").forEach(item => {
+            const show = !query || item.dataset.ownershipSearch.includes(query);
+            item.hidden = !show;
+            visible += Number(show);
           });
-        }
+          const ownershipCount = document.getElementById("ownership-count");
+          if (ownershipCount) ownershipCount.textContent = `${visible} champions`;
+        });
       })();
     </script>
     """
