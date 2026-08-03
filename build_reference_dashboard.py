@@ -257,6 +257,9 @@ def tracked_match_log() -> list[dict[str, object]]:
                     "kill_participation": p.get("challenges", {}).get("killParticipation"),
                     "lane_advantage": p.get("challenges", {}).get("laningPhaseGoldExpAdvantage"),
                     "skillshots_dodged": p.get("challenges", {}).get("skillshotsDodged"),
+                    "triple_kills": int(p.get("tripleKills", 0) or 0),
+                    "quadra_kills": int(p.get("quadraKills", 0) or 0),
+                    "penta_kills": int(p.get("pentaKills", 0) or 0),
                     "pings": {
                         key: int(p.get(key, 0) or 0)
                         for key in PING_TYPES
@@ -270,6 +273,57 @@ def tracked_match_log() -> list[dict[str, object]]:
         })
     rows.sort(key=lambda row: int(row["sort"]), reverse=True)
     return rows
+
+
+def add_multikill_columns(rendered: str) -> str:
+    """Append Riot's tracked-player multikill totals to Player Summary."""
+    totals: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"triple_kills": 0, "quadra_kills": 0, "penta_kills": 0}
+    )
+    for match in tracked_match_log():
+        for participant in match["participant_stats"]:
+            player = totals[str(participant["name"])]
+            for key in ("triple_kills", "quadra_kills", "penta_kills"):
+                player[key] += int(participant.get(key, 0) or 0)
+
+    table_match = re.search(
+        r'(<table id="player-summary" class="sortable-table">.*?</table>)',
+        rendered,
+        flags=re.DOTALL,
+    )
+    if table_match is None:
+        return rendered
+
+    table = table_match.group(1).replace(
+        '<th data-type="number">A</th>',
+        '<th data-type="number" title="Recorded triple-kill events">Triples</th>'
+        '<th data-type="number" title="Recorded quadra-kill events">Quadras</th>'
+        '<th data-type="number" title="Recorded pentakill events">Pentas</th>'
+        '<th data-type="number">A</th>',
+        1,
+    )
+
+    def add_cells(row_match: re.Match[str]) -> str:
+        row = row_match.group(0)
+        name_match = re.search(r'<td class="name-cell" data-sort="[^"]*">([^<]+)</td>', row)
+        if name_match is None:
+            return row
+        stats = totals.get(name_match.group(1), {})
+        cells = "".join(
+            f'<td class="number-cell multikill-cell" data-sort="{int(stats.get(key, 0))}">'
+            f'{int(stats.get(key, 0))}</td>'
+            for key in ("triple_kills", "quadra_kills", "penta_kills")
+        )
+        # Player Summary has Player, Games, W, L, WR, KDA, KP, K, D, A.
+        # Insert before its tenth cell (A), keeping headers and sortable values aligned.
+        row_cells = list(re.finditer(r'<td\b.*?</td>', row, flags=re.DOTALL))
+        if len(row_cells) < 10:
+            return row
+        insert_at = row_cells[9].start()
+        return row[:insert_at] + cells + row[insert_at:]
+
+    table = re.sub(r'<tr>.*?</tr>', add_cells, table, flags=re.DOTALL)
+    return rendered[:table_match.start()] + table + rendered[table_match.end():]
 
 
 def timeline_frame(timeline: dict, minute: int) -> dict:
@@ -2101,9 +2155,10 @@ def main() -> None:
     rendered = rendered.replace("</main>", tracked_combos + champion_history + matches + "</main>", 1)
     rendered = rendered.replace(
         "</head>",
-        "<style>.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}.champion-match-links{max-width:620px;padding:8px 0;line-height:1.8}.champion-match-links a{white-space:nowrap}.compact-champion-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 10px}.compact-champion-item{display:grid;grid-template-columns:32px minmax(70px,1fr) 42px;align-items:center;gap:8px;min-height:40px;padding:4px 8px 4px 5px;background:#172231;border:1px solid #2a394b;border-radius:7px}.compact-champion-item img{width:30px;height:30px;object-fit:cover;border-radius:6px}.champion-volume-track{display:block;height:9px;overflow:hidden;background:#253448;border-radius:999px}.champion-volume-track i{display:block;height:100%;background:linear-gradient(90deg,#3e8ee8,#72b5ff);border-radius:inherit}.compact-champion-item b,.vertical-champion-item b{color:#dcecff;font-size:.8rem;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}.vertical-chart-wrap{overflow-x:auto;padding:4px 2px 10px}.vertical-champion-strip{display:flex;align-items:flex-end;gap:7px;min-width:max-content;height:210px;padding:4px 8px}.vertical-champion-item{display:grid;grid-template-rows:18px 145px 32px;justify-items:center;gap:4px;width:34px;height:100%}.vertical-champion-item b{text-align:center}.vertical-volume-track{display:flex;align-items:flex-end;width:13px;height:145px;overflow:hidden;background:#253448;border-radius:5px}.vertical-volume-track i{display:block;width:100%;background:linear-gradient(0deg,#3e8ee8,#72b5ff);border-radius:inherit}.vertical-champion-item img{width:30px;height:30px;object-fit:cover;border-radius:6px;border:1px solid #3a4d63}@media(max-width:1050px){.compact-champion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.compact-champion-grid{grid-template-columns:1fr}.compact-champion-item{grid-template-columns:30px minmax(60px,1fr) 38px}.compact-champion-item img{width:28px;height:28px}}</style></head>",
+        "<style>.match-id{font-family:monospace;white-space:nowrap}.result-win{color:#59c58b;font-weight:700}.result-loss{color:#f07983;font-weight:700}.champion-match-links{max-width:620px;padding:8px 0;line-height:1.8}.champion-match-links a{white-space:nowrap}.multikill-cell{font-weight:800;color:#d5e8fa}.multikill-cell[data-sort=\"0\"]{color:#60758a}.compact-champion-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 10px}.compact-champion-item{display:grid;grid-template-columns:32px minmax(70px,1fr) 42px;align-items:center;gap:8px;min-height:40px;padding:4px 8px 4px 5px;background:#172231;border:1px solid #2a394b;border-radius:7px}.compact-champion-item img{width:30px;height:30px;object-fit:cover;border-radius:6px}.champion-volume-track{display:block;height:9px;overflow:hidden;background:#253448;border-radius:999px}.champion-volume-track i{display:block;height:100%;background:linear-gradient(90deg,#3e8ee8,#72b5ff);border-radius:inherit}.compact-champion-item b,.vertical-champion-item b{color:#dcecff;font-size:.8rem;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}.vertical-chart-wrap{overflow-x:auto;padding:4px 2px 10px}.vertical-champion-strip{display:flex;align-items:flex-end;gap:7px;min-width:max-content;height:210px;padding:4px 8px}.vertical-champion-item{display:grid;grid-template-rows:18px 145px 32px;justify-items:center;gap:4px;width:34px;height:100%}.vertical-champion-item b{text-align:center}.vertical-volume-track{display:flex;align-items:flex-end;width:13px;height:145px;overflow:hidden;background:#253448;border-radius:5px}.vertical-volume-track i{display:block;width:100%;background:linear-gradient(0deg,#3e8ee8,#72b5ff);border-radius:inherit}.vertical-champion-item img{width:30px;height:30px;object-fit:cover;border-radius:6px;border:1px solid #3a4d63}@media(max-width:1050px){.compact-champion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.compact-champion-grid{grid-template-columns:1fr}.compact-champion-item{grid-template-columns:30px minmax(60px,1fr) 38px}.compact-champion-item img{width:28px;height:28px}}</style></head>",
         1,
     )
+    rendered = add_multikill_columns(rendered)
     rendered = clean_and_order_overview_charts(rendered)
     index_path.write_text(rendered, encoding="utf-8")
     # This renderer's experimental page intentionally defines a pocket pick as
