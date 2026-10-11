@@ -1491,7 +1491,7 @@ def roster_matches_section() -> str:
 
 def tracked_combo_section() -> str:
     rows = tracked_match_log()
-    minimum_games = {2: 20, 3: 15, 4: 15, 5: 5}
+    minimum_games = {2: 50, 3: 30, 4: 20, 5: 5}
     panels = []
     for size in range(2, 6):
         records: dict[tuple[str, ...], dict[str, int]] = {}
