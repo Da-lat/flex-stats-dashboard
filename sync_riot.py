@@ -104,6 +104,21 @@ def retrieve(con: sqlite3.Connection, kind: str, resource_id: str, url: str, api
     return result
 
 
+def account_for_riot_id(con: sqlite3.Connection, riot_id: str, api_key: str, regional: str) -> object:
+    game_name, tag = riot_id.split("#", 1)
+    url = f"https://{regional}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{quote(game_name, safe='')}/{quote(tag, safe='')}"
+    try:
+        return retrieve(con, "account", riot_id.casefold(), url, api_key, timedelta(days=30))
+    except requests.HTTPError as exc:
+        if exc.response is None or exc.response.status_code != 404:
+            raise
+        row = con.execute("SELECT puuid FROM tracked_players WHERE riot_id=?", (riot_id,)).fetchone()
+        if not row or not row[0]:
+            raise
+        print(f"Warning: {riot_id} no longer resolves; using its archived player identity.")
+        return {"puuid": row[0]}
+
+
 def main() -> None:
     api_key = key()
     if not api_key:
@@ -113,8 +128,7 @@ def main() -> None:
     with connect() as con:
         ids: set[str] = set()
         for riot_id, name in roster():
-            game_name, tag = riot_id.split("#", 1)
-            account = retrieve(con, "account", riot_id.casefold(), f"https://{regional}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{quote(game_name, safe='')}/{quote(tag, safe='')}", api_key, timedelta(days=30))
+            account = account_for_riot_id(con, riot_id, api_key, regional)
             puuid = account["puuid"]
             con.execute("INSERT OR REPLACE INTO tracked_players VALUES (?, ?, ?, ?)", (riot_id, name, puuid, datetime.now(timezone.utc).isoformat()))
             retrieve(con, "summoner", puuid, f"https://{PLATFORM}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/{puuid}", api_key, timedelta(days=30))
