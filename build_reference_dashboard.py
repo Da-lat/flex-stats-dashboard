@@ -1718,10 +1718,16 @@ def rank_scatter_chart(
             f'</g>'
         )
 
+    unranked_note = ""
+    if len(excluded) == 1:
+        unranked_note = f" {escape(excluded[0])} is unranked for now."
+    elif excluded:
+        unranked_note = f" {escape(', '.join(excluded))} are unranked for now."
+
     return f"""
     <article class="chart-panel rank-scatter-panel">
       <div class="rank-chart-heading">
-        <div><h3>{escape(title)}</h3><p class="chart-note">Highest current rating across each person's linked Riot IDs.{f" Excludes {escape(', '.join(excluded))}." if excluded else ""}</p></div>
+        <div><h3>{escape(title)}</h3><p class="chart-note">Highest current rating across each person's linked Riot IDs.{unranked_note}</p></div>
         <div class="rank-chart-summary"><strong>{ranked_count} ranked</strong><span>{unranked_count} unranked</span></div>
       </div>
       <div class="rank-scatter-scroll">
@@ -1734,7 +1740,7 @@ def rank_scatter_chart(
           {''.join(points)}
         </svg>
       </div>
-      <p class="rank-chart-footer">Rank data refreshed {escape(fetched_label)}. Average excludes unranked players{f" and {escape(', '.join(excluded))}" if excluded else ""}.</p>
+      <p class="rank-chart-footer">Rank data refreshed {escape(fetched_label)}. Average excludes unranked players.</p>
     </article>
     """
 
