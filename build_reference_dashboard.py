@@ -1605,8 +1605,16 @@ def ranked_roster_rows(queue_type: str) -> tuple[list[dict[str, object]], str]:
     return rows, fetched_label
 
 
-def rank_scatter_chart(queue_type: str, title: str, chart_id: str) -> str:
+def rank_scatter_chart(
+    queue_type: str,
+    title: str,
+    chart_id: str,
+    excluded_names: set[str] | None = None,
+) -> str:
     rows, fetched_label = ranked_roster_rows(queue_type)
+    exclusions = {name.casefold() for name in (excluded_names or set())}
+    excluded = [str(row["name"]) for row in rows if str(row["name"]).casefold() in exclusions]
+    rows = [row for row in rows if str(row["name"]).casefold() not in exclusions]
     rows.sort(
         key=lambda row: (
             row["score"] is None,
@@ -1713,7 +1721,7 @@ def rank_scatter_chart(queue_type: str, title: str, chart_id: str) -> str:
     return f"""
     <article class="chart-panel rank-scatter-panel">
       <div class="rank-chart-heading">
-        <div><h3>{escape(title)}</h3><p class="chart-note">Highest current rating across each person's linked Riot IDs.</p></div>
+        <div><h3>{escape(title)}</h3><p class="chart-note">Highest current rating across each person's linked Riot IDs.{f" Excludes {escape(', '.join(excluded))}." if excluded else ""}</p></div>
         <div class="rank-chart-summary"><strong>{ranked_count} ranked</strong><span>{unranked_count} unranked</span></div>
       </div>
       <div class="rank-scatter-scroll">
@@ -1726,7 +1734,7 @@ def rank_scatter_chart(queue_type: str, title: str, chart_id: str) -> str:
           {''.join(points)}
         </svg>
       </div>
-      <p class="rank-chart-footer">Rank data refreshed {escape(fetched_label)}. Average excludes unranked players.</p>
+      <p class="rank-chart-footer">Rank data refreshed {escape(fetched_label)}. Average excludes unranked players{f" and {escape(', '.join(excluded))}" if excluded else ""}.</p>
     </article>
     """
 
@@ -1736,7 +1744,7 @@ def rankings_section() -> str:
     <section id="rankings" class="section rank-ratings-section">
       <div class="section-title"><div><h2>Current Ranked Ratings</h2><p class="note">One point per listed person. Standard tiers use 100 LP per division from IV to I; Master, Grandmaster and Challenger continue above Diamond using Riot's raw LP.</p></div></div>
       <div class="rank-scatter-stack">
-        {rank_scatter_chart("RANKED_SOLO_5x5", "Ranked Solo / Duo", "solo-rank-scatter")}
+        {rank_scatter_chart("RANKED_SOLO_5x5", "Ranked Solo / Duo", "solo-rank-scatter", {"Brands"})}
         {rank_scatter_chart("RANKED_FLEX_SR", "Ranked Flex 5v5", "flex-rank-scatter")}
       </div>
       <style>
