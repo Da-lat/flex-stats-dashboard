@@ -1744,7 +1744,8 @@ def rankings_section() -> str:
       <div class="section-title"><div><h2>Current Ranked Ratings</h2><p class="note">One point per listed person. Standard tiers use 100 LP per division from IV to I; Master, Grandmaster and Challenger continue above Diamond using Riot's raw LP.</p></div></div>
       <div class="rank-scatter-stack">
         {rank_scatter_chart("RANKED_SOLO_5x5", "Ranked Solo / Duo", "solo-rank-scatter", {"Brands"})}
-        {rank_scatter_chart("RANKED_FLEX_SR", "Ranked Flex 5v5", "flex-rank-scatter")}
+        {rank_scatter_chart("RANKED_FLEX_SR", "Ranked Flex", "flex-rank-scatter")}
+        {rank_scatter_chart("RANKED_PREMADE_5x5", "Ranked 5v5", "premade-rank-scatter")}
       </div>
       <style>
         .rank-scatter-stack{{display:grid;gap:20px}}
