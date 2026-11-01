@@ -50,6 +50,7 @@ PING_TYPES = {
 }
 SHARED_NAV_HTML = """<nav class="shared-dashboard-nav">
     <a href="index.html#overview">Dashboard</a>
+    <a href="index.html#rankings">Rankings</a>
     <a href="index.html#players">Players</a>
     <a href="index.html#champions">Champions</a>
     <a href="index.html#combos">Combos</a>
@@ -70,6 +71,21 @@ SHARED_NAV_CSS = """<style id="shared-dashboard-nav-style">
   }
   nav.shared-dashboard-nav a:hover { background: #1a2633; }
 </style>"""
+RANK_TIERS = ("IRON", "BRONZE", "SILVER", "GOLD", "PLATINUM", "EMERALD", "DIAMOND")
+RANK_DIVISIONS = ("IV", "III", "II", "I")
+RANK_TIER_COLORS = {
+    "IRON": "#8d8179",
+    "BRONZE": "#b8734f",
+    "SILVER": "#9fabb8",
+    "GOLD": "#d7aa43",
+    "PLATINUM": "#58b8ad",
+    "EMERALD": "#3bcf88",
+    "DIAMOND": "#6f9cff",
+    "MASTER": "#b77cff",
+    "GRANDMASTER": "#ee6570",
+    "CHALLENGER": "#5fd4eb",
+    "UNRANKED": "#66778a",
+}
 
 
 def winrate_color(winrate: float) -> str:
@@ -104,6 +120,77 @@ def tracked_real_names() -> set[str]:
         for line in ROSTER_FILE.read_text(encoding="utf-8-sig").splitlines()
         if line.strip() and not line.lstrip().startswith("#") and "|" in line
     }
+
+
+def roster_account_groups() -> list[tuple[str, list[str]]]:
+    """Return current Riot IDs grouped by the real name used in the dashboard."""
+    groups = []
+    for raw_line in ROSTER_FILE.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "|" not in line:
+            continue
+        accounts, display_name = line.split("|", 1)
+        groups.append(
+            (
+                display_name.strip(),
+                [account.strip() for account in accounts.split(",") if account.strip()],
+            )
+        )
+    return groups
+
+
+def ranked_rating_score(entry: dict[str, object]) -> float:
+    """Map a Riot rank to a continuous ladder score suitable for plotting."""
+    tier = str(entry.get("tier", "")).upper()
+    league_points = max(0, int(entry.get("leaguePoints", 0) or 0))
+    if tier in RANK_TIERS:
+        division = str(entry.get("rank", "IV")).upper()
+        division_index = RANK_DIVISIONS.index(division) if division in RANK_DIVISIONS else 0
+        return float(((RANK_TIERS.index(tier) * 4) + division_index) * 100 + league_points)
+    if tier in {"MASTER", "GRANDMASTER", "CHALLENGER"}:
+        # Master+ has no divisions. Riot's actual LP continues above Diamond I.
+        return float(len(RANK_TIERS) * 4 * 100 + league_points)
+    return -100.0
+
+
+def ranked_rating_label(entry: dict[str, object]) -> str:
+    tier = str(entry.get("tier", "UNRANKED")).upper()
+    league_points = int(entry.get("leaguePoints", 0) or 0)
+    if tier in RANK_TIERS:
+        return f"{tier.title()} {str(entry.get('rank', 'IV')).upper()} - {league_points} LP"
+    if tier in {"MASTER", "GRANDMASTER", "CHALLENGER"}:
+        return f"{tier.title()} - {league_points} LP"
+    return "Unranked"
+
+
+def rating_axis_label(score: float) -> str:
+    if score < 0:
+        return "Unranked"
+    master_base = len(RANK_TIERS) * 4 * 100
+    if score >= master_base:
+        return f"Master+ {score - master_base:.0f} LP"
+    division_block = max(0, min((len(RANK_TIERS) * 4) - 1, int(score // 100)))
+    tier = RANK_TIERS[division_block // 4].title()
+    division = RANK_DIVISIONS[division_block % 4]
+    return f"{tier} {division} {score % 100:.0f} LP"
+
+
+def compact_rating_label(entry: dict[str, object] | None) -> str:
+    if entry is None:
+        return "UR"
+    tier = str(entry.get("tier", "UNRANKED")).upper()
+    league_points = int(entry.get("leaguePoints", 0) or 0)
+    abbreviations = {
+        "IRON": "Ir", "BRONZE": "B", "SILVER": "S", "GOLD": "G",
+        "PLATINUM": "P", "EMERALD": "E", "DIAMOND": "D",
+        "MASTER": "M", "GRANDMASTER": "GM", "CHALLENGER": "C",
+    }
+    if tier in RANK_TIERS:
+        division_number = {"IV": 4, "III": 3, "II": 2, "I": 1}.get(
+            str(entry.get("rank", "IV")).upper(), 4
+        )
+        return f"{abbreviations[tier]}{division_number} {league_points}"
+    return f"{abbreviations.get(tier, 'UR')} {league_points}" if tier != "UNRANKED" else "UR"
 
 
 def display_role(participant: dict) -> str:
@@ -1466,6 +1553,218 @@ def replace_champion_winrate_charts(html: str, renderer) -> str:
     return html
 
 
+def ranked_roster_rows(queue_type: str) -> tuple[list[dict[str, object]], str]:
+    """Return one row per listed person, using their highest linked-account rank."""
+    with sqlite3.connect(DATABASE) as con:
+        puuid_by_riot_id = {
+            str(riot_id).casefold(): str(puuid)
+            for riot_id, puuid in con.execute(
+                "SELECT riot_id, puuid FROM tracked_players WHERE puuid IS NOT NULL"
+            )
+        }
+        rank_payloads = {
+            str(resource_id): json.loads(payload)
+            for resource_id, payload in con.execute(
+                "SELECT resource_id, payload FROM riot_payloads WHERE kind='rank'"
+            )
+        }
+        latest_fetch = con.execute(
+            "SELECT MAX(fetched_at) FROM riot_payloads WHERE kind='rank'"
+        ).fetchone()[0]
+
+    rows = []
+    for display_name, riot_ids in roster_account_groups():
+        best: dict[str, object] | None = None
+        for riot_id in riot_ids:
+            puuid = puuid_by_riot_id.get(riot_id.casefold())
+            payload = rank_payloads.get(puuid or "", [])
+            if not isinstance(payload, list):
+                continue
+            for raw_entry in payload:
+                if not isinstance(raw_entry, dict) or raw_entry.get("queueType") != queue_type:
+                    continue
+                candidate = dict(raw_entry)
+                candidate["riot_id"] = riot_id
+                candidate["score"] = ranked_rating_score(candidate)
+                if best is None or float(candidate["score"]) > float(best["score"]):
+                    best = candidate
+        rows.append(
+            {
+                "name": display_name,
+                "accounts": riot_ids,
+                "entry": best,
+                "score": float(best["score"]) if best is not None else None,
+            }
+        )
+
+    fetched_label = "Unknown"
+    if latest_fetch:
+        fetched_label = datetime.fromisoformat(str(latest_fetch)).astimezone(UK_TIMEZONE).strftime(
+            "%d %b %Y, %H:%M %Z"
+        )
+    return rows, fetched_label
+
+
+def rank_scatter_chart(queue_type: str, title: str, chart_id: str) -> str:
+    rows, fetched_label = ranked_roster_rows(queue_type)
+    rows.sort(
+        key=lambda row: (
+            row["score"] is None,
+            -float(row["score"]) if row["score"] is not None else 0,
+            str(row["name"]).casefold(),
+        )
+    )
+    ranked_scores = [float(row["score"]) for row in rows if row["score"] is not None]
+    average = sum(ranked_scores) / len(ranked_scores) if ranked_scores else 0.0
+    ranked_count = len(ranked_scores)
+    unranked_count = len(rows) - ranked_count
+
+    width, height = 1320, 820
+    left, right, top, bottom = 112, 178, 45, 118
+    plot_width, plot_height = width - left - right, height - top - bottom
+    plot_min = -160.0
+    master_base = float(len(RANK_TIERS) * 4 * 100)
+    highest_score = max(ranked_scores, default=0.0)
+    if highest_score >= master_base:
+        master_steps = int((highest_score - master_base + 99) // 100) + 1
+        plot_max = master_base + (master_steps * 100)
+    else:
+        plot_max = master_base
+
+    def y_position(score: float) -> float:
+        return top + ((plot_max - score) / (plot_max - plot_min) * plot_height)
+
+    plot_right = left + plot_width
+    bands = [
+        f'<rect x="{left}" y="{y_position(0):.1f}" width="{plot_width}" '
+        f'height="{y_position(plot_min) - y_position(0):.1f}" fill="{RANK_TIER_COLORS["UNRANKED"]}" opacity=".08"/>'
+    ]
+    for tier_index, tier in enumerate(RANK_TIERS):
+        lower, upper = tier_index * 400.0, (tier_index + 1) * 400.0
+        bands.append(
+            f'<rect x="{left}" y="{y_position(upper):.1f}" width="{plot_width}" '
+            f'height="{y_position(lower) - y_position(upper):.1f}" '
+            f'fill="{RANK_TIER_COLORS[tier]}" opacity=".055"/>'
+        )
+    if plot_max > master_base:
+        bands.append(
+            f'<rect x="{left}" y="{y_position(plot_max):.1f}" width="{plot_width}" '
+            f'height="{y_position(master_base) - y_position(plot_max):.1f}" '
+            f'fill="{RANK_TIER_COLORS["MASTER"]}" opacity=".06"/>'
+        )
+
+    grid = []
+    unranked_y = y_position(-100)
+    grid.append(
+        f'<line x1="{left}" y1="{unranked_y:.1f}" x2="{plot_right}" y2="{unranked_y:.1f}" class="rank-grid tier-grid"/>'
+        f'<text x="{left - 10}" y="{unranked_y + 4:.1f}" class="rank-axis-label">Unranked</text>'
+    )
+    for block in range(len(RANK_TIERS) * 4):
+        score = float(block * 100)
+        tier = RANK_TIERS[block // 4]
+        division = RANK_DIVISIONS[block % 4]
+        y = y_position(score)
+        line_class = "rank-grid tier-grid" if block % 4 == 0 else "rank-grid"
+        grid.append(
+            f'<line x1="{left}" y1="{y:.1f}" x2="{plot_right}" y2="{y:.1f}" class="{line_class}"/>'
+            f'<text x="{left - 10}" y="{y + 4:.1f}" class="rank-axis-label">{tier.title()} {division}</text>'
+        )
+    for score in range(int(master_base), int(plot_max) + 1, 100):
+        y = y_position(float(score))
+        grid.append(
+            f'<line x1="{left}" y1="{y:.1f}" x2="{plot_right}" y2="{y:.1f}" class="rank-grid tier-grid"/>'
+            f'<text x="{left - 10}" y="{y + 4:.1f}" class="rank-axis-label">Master+ {score - int(master_base)} LP</text>'
+        )
+
+    average_y = y_position(average)
+    average_label = rating_axis_label(average)
+    average_line = (
+        f'<line x1="{left}" y1="{average_y:.1f}" x2="{plot_right}" y2="{average_y:.1f}" class="rank-average-line"/>'
+        f'<text x="{plot_right + 12}" y="{average_y - 5:.1f}" class="rank-average-label">Average</text>'
+        f'<text x="{plot_right + 12}" y="{average_y + 12:.1f}" class="rank-average-value">{escape(average_label)}</text>'
+    )
+
+    point_step = plot_width / max(1, len(rows) - 1)
+    points = []
+    for index, row in enumerate(rows):
+        x = left + (index * point_step if len(rows) > 1 else plot_width / 2)
+        entry = row["entry"] if isinstance(row["entry"], dict) else None
+        score = float(row["score"]) if row["score"] is not None else -100.0
+        y = y_position(score)
+        tier = str(entry.get("tier", "UNRANKED")).upper() if entry else "UNRANKED"
+        color = RANK_TIER_COLORS.get(tier, RANK_TIER_COLORS["UNRANKED"])
+        rating = ranked_rating_label(entry) if entry else "Unranked"
+        account = str(entry.get("riot_id")) if entry else ", ".join(row["accounts"])
+        record = ""
+        if entry:
+            wins, losses = int(entry.get("wins", 0) or 0), int(entry.get("losses", 0) or 0)
+            record = f" - {wins}-{losses} record"
+        tooltip = f"{row['name']}: {rating} - {account}{record}"
+        points.append(
+            f'<g class="rank-point" tabindex="0" role="img" aria-label="{escape(tooltip)}">'
+            f'<title>{escape(tooltip)}</title>'
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="7" fill="{color}"/>'
+            f'<text x="{x:.1f}" y="{y - 12:.1f}" class="rank-point-value">{escape(compact_rating_label(entry))}</text>'
+            f'<text x="{x:.1f}" y="{height - bottom + 20}" class="rank-player-label" '
+            f'transform="rotate(-48 {x:.1f} {height - bottom + 20})">{escape(str(row["name"]))}</text>'
+            f'</g>'
+        )
+
+    return f"""
+    <article class="chart-panel rank-scatter-panel">
+      <div class="rank-chart-heading">
+        <div><h3>{escape(title)}</h3><p class="chart-note">Highest current rating across each person's linked Riot IDs.</p></div>
+        <div class="rank-chart-summary"><strong>{ranked_count} ranked</strong><span>{unranked_count} unranked</span></div>
+      </div>
+      <div class="rank-scatter-scroll">
+        <svg class="rank-scatter" viewBox="0 0 {width} {height}" role="img" aria-labelledby="{chart_id}-title {chart_id}-description">
+          <title id="{chart_id}-title">{escape(title)} ratings for the tracked roster</title>
+          <desc id="{chart_id}-description">A scatter plot of all listed people. The dashed line is the average of ranked players.</desc>
+          {''.join(bands)}
+          {''.join(grid)}
+          {average_line}
+          {''.join(points)}
+        </svg>
+      </div>
+      <p class="rank-chart-footer">Rank data refreshed {escape(fetched_label)}. Average excludes unranked players.</p>
+    </article>
+    """
+
+
+def rankings_section() -> str:
+    return f"""
+    <section id="rankings" class="section rank-ratings-section">
+      <div class="section-title"><div><h2>Current Ranked Ratings</h2><p class="note">One point per listed person. Standard tiers use 100 LP per division from IV to I; Master, Grandmaster and Challenger continue above Diamond using Riot's raw LP.</p></div></div>
+      <div class="rank-scatter-stack">
+        {rank_scatter_chart("RANKED_SOLO_5x5", "Ranked Solo / Duo", "solo-rank-scatter")}
+        {rank_scatter_chart("RANKED_FLEX_SR", "Ranked Flex 5v5", "flex-rank-scatter")}
+      </div>
+      <style>
+        .rank-scatter-stack{{display:grid;gap:20px}}
+        .rank-scatter-panel{{padding:18px}}
+        .rank-chart-heading{{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:8px}}
+        .rank-chart-heading h3{{margin:0 0 4px}}
+        .rank-chart-heading p{{margin:0}}
+        .rank-chart-summary{{display:flex;gap:8px;align-items:center;white-space:nowrap}}
+        .rank-chart-summary strong,.rank-chart-summary span{{padding:6px 9px;border-radius:999px;background:#1b2938;font-size:.78rem}}
+        .rank-chart-summary strong{{color:#75dba6}}.rank-chart-summary span{{color:#9fb0c2}}
+        .rank-scatter-scroll{{overflow-x:auto}}
+        .rank-scatter{{display:block;width:100%;min-width:1040px;height:auto;background:#111b27;border:1px solid #27384b;border-radius:10px}}
+        .rank-grid{{stroke:#52657b;stroke-width:1;opacity:.28}}.rank-grid.tier-grid{{opacity:.58;stroke-width:1.15}}
+        .rank-axis-label{{fill:#9fb0c2;font-size:10px;text-anchor:end;font-weight:650}}
+        .rank-average-line{{stroke:#f3cc68;stroke-width:2.5;stroke-dasharray:8 6}}
+        .rank-average-label{{fill:#f3cc68;font-size:12px;font-weight:900}}.rank-average-value{{fill:#d9e4ef;font-size:10px;font-weight:700}}
+        .rank-point circle{{stroke:#f1f6fb;stroke-width:2;filter:drop-shadow(0 2px 3px #0008);transition:r .16s ease,stroke-width .16s ease}}
+        .rank-point:hover circle,.rank-point:focus circle{{r:10;stroke-width:3}}.rank-point:focus{{outline:none}}
+        .rank-point-value{{fill:#edf5fd;font-size:9px;font-weight:900;text-anchor:middle;paint-order:stroke;stroke:#111b27;stroke-width:3px;stroke-linejoin:round}}
+        .rank-player-label{{fill:#c9d7e5;font-size:11px;font-weight:750;text-anchor:end}}
+        .rank-chart-footer{{margin:8px 0 0;color:#8193a6;font-size:.78rem}}
+        @media(max-width:720px){{.rank-chart-heading{{flex-direction:column}}.rank-scatter{{min-width:980px}}}}
+      </style>
+    </section>
+    """
+
+
 def roster_matches_section() -> str:
     rows = tracked_match_log()
     def champion_pairs_html(champions: list[str]) -> str:
@@ -2151,7 +2450,9 @@ def main() -> None:
             rendered = rendered[:unplayed_start] + rendered[unplayed_end + len("</section>"):]
     tracked_combos = tracked_combo_section()
     champion_history = tracked_champion_history_section()
-    rendered = rendered.replace("</nav>", '<a href="#combos">Combos</a><a href="#matches">Matches</a></nav>', 1)
+    rankings = rankings_section()
+    rendered = rendered.replace("</nav>", '<a href="#rankings">Rankings</a><a href="#combos">Combos</a><a href="#matches">Matches</a></nav>', 1)
+    rendered = rendered.replace('<section id="players"', rankings + '<section id="players"', 1)
     rendered = rendered.replace("</main>", tracked_combos + champion_history + matches + "</main>", 1)
     rendered = rendered.replace(
         "</head>",
