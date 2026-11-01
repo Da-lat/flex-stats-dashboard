@@ -1613,7 +1613,6 @@ def rank_scatter_chart(
 ) -> str:
     rows, fetched_label = ranked_roster_rows(queue_type)
     exclusions = {name.casefold() for name in (excluded_names or set())}
-    excluded = [str(row["name"]) for row in rows if str(row["name"]).casefold() in exclusions]
     rows = [row for row in rows if str(row["name"]).casefold() not in exclusions]
     rows.sort(
         key=lambda row: (
@@ -1718,16 +1717,10 @@ def rank_scatter_chart(
             f'</g>'
         )
 
-    unranked_note = ""
-    if len(excluded) == 1:
-        unranked_note = f" {escape(excluded[0])} is unranked for now."
-    elif excluded:
-        unranked_note = f" {escape(', '.join(excluded))} are unranked for now."
-
     return f"""
     <article class="chart-panel rank-scatter-panel">
       <div class="rank-chart-heading">
-        <div><h3>{escape(title)}</h3><p class="chart-note">Highest current rating across each person's linked Riot IDs.{unranked_note}</p></div>
+        <div><h3>{escape(title)}</h3><p class="chart-note">Highest current rating across each person's linked Riot IDs.</p></div>
         <div class="rank-chart-summary"><strong>{ranked_count} ranked</strong><span>{unranked_count} unranked</span></div>
       </div>
       <div class="rank-scatter-scroll">
